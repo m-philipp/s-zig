@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, TU Darmstadt.
+ * Copyright (c) 2013, TU Darmstadt.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,6 +28,14 @@
  *
  * This file is part of the Contiki operating system.
  */
+ 
+ // uIP TCP/IP stack in Contiki: http://contiki.sourceforge.net/docs/2.6/a01793.html
+ // Protosockets in Contiki: http://contiki.sourceforge.net/docs/2.6/a01689.html
+ // Contiki Lists: http://contiki.sourceforge.net/docs/2.6/a00004.html#a3
+ 
+ // psock-client: https://github.com/contiki-os/contiki/blob/master/doc/example-psock-client.c
+ // psock-server: https://github.com/contiki-os/contiki/blob/master/doc/example-psock-server.c
+ 
 
 #include "contiki.h"
 #include "dev/leds.h"
@@ -35,12 +43,19 @@
 #include "contiki-net.h"
 #include "ringbuf.h"
 
+#include "lib/list.h"
+#include "lib/memb.h"
+
 #include <string.h>
 
 #include <stdio.h>
 #include <stdbool.h>
 
 //#define INTERVAL (CLOCK_SECOND/2)
+#define SERVER_NOT_CONNECTED 0
+#define SERVER_CONNECTED 1
+#define CLIENT_NOT_CONNECTED 2
+#define CLIENT_CONNECTED 3
 
 /*---------------------------------------------------------------------------*/
 uint8_t serialRx[128]; // need size of power two!
@@ -55,6 +70,23 @@ static struct psock ps;
 static char psock_RxBuffer[8];
 
 void callback(uint8_t d);
+void addConnection(uint16_t);
+void removeConnection(void *n);
+
+
+struct connection_list_struct {
+	struct connection_list_struct *next;
+  
+	uint8_t tcpRx_Buffer[128];
+	uint16_t port;
+	uint8_t isServer;
+	struct psock ps;
+};
+
+#define PACKET_TIMEOUT 60 * CLOCK_SECOND
+#define MAX_CONNECTIONS 16
+LIST(connection_list);
+MEMB(connection_mem, struct connection_list_struct, MAX_CONNECTIONS);
                                             
 
 /*---------------------------------------------------------------------------*/
@@ -82,12 +114,30 @@ PROCESS_THREAD(plastic_sense_process, ev, data)
 	uart0_set_input(callback);
   	ringbuf_init(&serialRx_Buffer, serialRx, sizeof(serialRx));
 	
+	
+	list_init(connection_list);
+	
 	tcp_listen(UIP_HTONS(1010));
 
   	leds_on(LEDS_ALL);
 
 	while(1) {
 	
+		
+		int i = 0;
+		struct connection_list_struct *n;
+		for(n = list_head(connection_list); n != NULL && i != list_length(connection_list); n = n->next) {
+			if(n->port == uip_conn){
+			
+				// TODO Handle Connection
+			
+			}
+		}
+	
+	
+	
+	
+		
 		PROCESS_WAIT_EVENT();
 		
 		if(ev == tcpip_event && !connected){
@@ -117,5 +167,28 @@ PROCESS_THREAD(plastic_sense_process, ev, data)
 void callback(uint8_t d){
          ringbuf_put(&serialRx_Buffer, d);
          process_poll(&plastic_sense_process);
+}
+/*---------------------------------------------------------------------------*/
+void addConnection(uint8_t isServer, uint16_t port, uip_ipaddr_t addr){
+	struct connection_list_struct *e;
+	e = memb_alloc(&connection_mem);
+
+	newElement->port = port;
+	newElement->isServer = isServer;
+	
+	list_add(connection_list, e);
+	
+	if(isServer != 1) tcp_listen(UIP_HTONS(port));
+	else tcp_connect(addr, UIP_HTONS(port), NULL);
+	
+
+}
+void removeConnection(void *n)
+{
+  struct connection_list_struct *e = n;
+  list_remove(connection_list, e);
+  memb_free(&connection_mem, e);
+  
+  // TODO close port and Stop Protothread
 }
 
