@@ -1,0 +1,11 @@
+*.jnode
+*.native
+*.a
+obj_*
+*.bin
+*.map
+*.elf
+*.ihex
+*.hex
+tags
+symbols.*
