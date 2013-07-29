@@ -61,43 +61,83 @@ struct ringbuf serialRx_Buffer;
 int8_t transmissionBuffer[128];
 uint8_t transmissionPointer = 0;
 
-bool connected = false;
-static struct psock ps;
-// PSOCK Input Buffer
-static char psock_RxBuffer[8];
 
 void callback(uint8_t d);
+void clearConnection(struct connection *c);
+void tcp_appcall(void *state);
+void serial_appcall(void *state);
 
 // Parser
 void addConnection(uint16_t);
 void removeConnection(void *n);
 
+struct arduinoServer {
+	uint16_t localPort;
+};
 
-struct connection_struct {
+struct connection {
+	bool free = true;
+	unsigned char timer;
+	// Psock Read Buffer
 	uint8_t tcpRx_Buffer[128];
-	uint16_t port;
-	uint8_t isServer;
-	struct psock ps;
+	uint8_t tcpRx_Pointer = 0;
+	
+	uint8_t tcpTx_Buffer[128];
+	uint8_t tcpTx_Pointer = 0;
+	
+	struct psock ps_in, ps_out;
 };
 
 #define PACKET_TIMEOUT 60 * CLOCK_SECOND
 #define MAX_CONNECTIONS 16
+#define MAX_SERVER 4
 
-struct connection_struct connections[MAX_CONNECTIONS];                                     
-
+struct connection connections[MAX_CONNECTIONS];                                     
+struct arduinoServer arduinoServers[MAX_SERVER];    
 /*---------------------------------------------------------------------------*/
 static 
-PT_THREAD(handle_connection(struct psock *p))
+PT_THREAD(handle_input(struct connection *c))
 {
+	struct psock *p = c->ps_in;
+	
 	PSOCK_BEGIN(p);
-	PSOCK_READTO(p, '\n');
-	PSOCK_SEND(p, transmissionBuffer, sizeof(transmissionBuffer));
-	transmissionPointer = 0;
+	
+	while(1){
+		PSOCK_WAIT_UNTIL(p, PSOCK_NEWDATA(s));
+   
+		PSOCK_READBUF_LEN(p, 1);
+		c->tcpRx_Pointer++;
+			
+	}
+	
+	
   	PSOCK_CLOSE(p);
 	PSOCK_END(p);
 }
-
-
+/*---------------------------------------------------------------------------*/
+static
+PT_THREAD(handle_output(struct connection *c))
+{
+	struct psock *p = c->ps_out;
+	
+	PSOCK_BEGIN(p);
+	
+	while(1){
+		if(c->tcpTx_Pointer > 0){
+			PSOCK_SEND(p, c->tcpTx_Buffer, c->tcpTx_Pointer);
+			c->tcpTx_Pointer = 0;
+		}
+	}
+	PSOCK_CLOSE(p);
+	PSOCK_END(p);
+}
+/*---------------------------------------------------------------------------*/
+static void
+handle_connection(struct httpd_state *s)
+{
+	handle_input(s);
+	handle_output(s);
+}
 /*---------------------------------------------------------------------------*/
 PROCESS(plastic_sense_process, "plastic sense process");
 AUTOSTART_PROCESSES(&plastic_sense_process);
@@ -111,51 +151,16 @@ PROCESS_THREAD(plastic_sense_process, ev, data)
   	ringbuf_init(&serialRx_Buffer, serialRx, sizeof(serialRx));
 	
 	
-	tcp_listen(UIP_HTONS(1010));
-
-  	leds_on(LEDS_ALL);
-
 	while(1) {
-	
 		PROCESS_WAIT_EVENT();
-		
-		int i = 0;
-		for(i = 0; i < MAX_CONNECTIONS; i++) {
-		
-			if(n->port == uip_conn){
-			
-				// TODO Handle Connection
-			
-			
-			if(ev == tcpip_event && !connected){
-				if(uip_connected()) {
-					PSOCK_INIT(&ps, psock_RxBuffer, sizeof(psock_RxBuffer));
-				}
-				connected = true;
-			}
-			else if(ev == tcpip_event && connected){
-				if(!(uip_aborted() || uip_closed() || uip_timedout())){
-					handle_connection(&ps);
-				}
-				else{
-					connected = false;
-				}
-			} else{
-				while(ringbuf_elements(&serialRx_Buffer) && transmissionPointer < sizeof(transmissionBuffer)){
-							transmissionBuffer[transmissionPointer]  = ringbuf_get(&serialRx_Buffer);
-							transmissionPointer++;
-				}
-			}
-			}
-				
+		if(ev == tcpip_event){
+			tcp_appcall(data);
 		}
-	
-	
-	
-	
-		
-		
-  	}	
+		else{
+			//handle Serial callback
+			serial_appcall(data);
+		}
+	}
 
 	PROCESS_END();
 }
@@ -165,26 +170,86 @@ void callback(uint8_t d){
          process_poll(&plastic_sense_process);
 }
 /*---------------------------------------------------------------------------*/
-void addConnection(uint8_t isServer, uint16_t port, uip_ipaddr_t addr){
-	struct connection_list_struct *e;
-	e = memb_alloc(&connection_mem);
+void tcp_appcall(void *state){
+	struct connection *c = (struct connection *)state;
+	
+	if(uip_closed() || uip_aborted() || uip_timedout()) {
+		if(c != NULL) {
+			// free Connection c
+			clearConnection(c);
+		}
+	} else if(uip_connected()){ // ?! -> && c == NULL) {
+	
+		int i = 0;
+		// Add new Connection (= mark one free Connection as non-free)
+		for(i = 0; i < MAX_CONNECTIONS; i++) {
+			if(connections[i]->free == true){
+				connections[i]->free = false;
+				c = &connections[i];
+			}
+		}
+		if(i == MAX_CONNECTIONS) {
+			//abort Connection if already MAX_CONNECTIONS are open.
+			uip_abort();
+			return;
+		}
+		tcp_markconn(uip_conn, c);
+		PSOCK_INIT(&c->ps_in, (uint8_t *)c->tcpRx_Buffer, sizeof(c->tcpRx_Buffer) - 1);
+		PSOCK_INIT(&c->ps_out, (uint8_t *)c->tcpRx_Buffer, sizeof(c->tcpRx_Buffer) - 1);
+		
+		c->timer = 0;
+		handle_connection(c);
+	} else if(c != NULL) {
+		// check if call came from uip-poll
+		if(uip_poll()) {
+		  ++c->timer;
+		  if(c->timer >= 20) {
+			uip_abort();
+			clearConnection(c);
+		  }
+		} else {
+		  c->timer = 0;
+		}
+		handle_connection(c);
+	} else {
+		uip_abort();
+	}
+}
+/*---------------------------------------------------------------------------*/
+void clearConnection(struct connection *c){
+	c->free = true;
+	c->timer = 0;
+	// TODO
+	c->tcpRx_Buffer = NULL;
+	c->ps = NULL;
+}
+/*---------------------------------------------------------------------------*/
+void serial_appcall(data){
 
-	newElement->port = port;
-	newElement->isServer = isServer;
+	// TODO Magic
+	/*
 	
-	list_add(connection_list, e);
+	decode serial line commands
+	 |-> add/remove connections
+	 |-> Add something to the tcp_Tx Buffers
+	 |-> Read sometrhin from the tcp_Rx Buffers
+	 
+	 */
+
+}
+
+
+void addConnection(uint8_t isServer, uint16_t port, uip_ipaddr_t addr){
 	
-	if(isServer != 1) tcp_listen(UIP_HTONS(port));
+	
+	
+	if(isServer == 1) tcp_listen(UIP_HTONS(port));
 	else tcp_connect(addr, UIP_HTONS(port), NULL);
 	
 
 }
 void removeConnection(void *n)
 {
-  struct connection_list_struct *e = n;
-  list_remove(connection_list, e);
-  memb_free(&connection_mem, e);
   
-  // TODO close port and Stop Protothread
 }
 
