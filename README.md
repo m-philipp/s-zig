@@ -1,7 +1,7 @@
 #Serial ZigBee Interface:
 
 
-This Repo enables the [Arduino-firmware](https://github.com/pscholl/Arduino) running on ATmega 32u4 in the JNode to use the Jennics ZigBee-Radio. 
+This Code enables the [Arduino-firmware](https://github.com/pscholl/Arduino) running on ATmega 32u4 in the JNode to use the Jennics ZigBee-Radio, via the Arduino Ethernet Library.
 
 **TODO:**
 
