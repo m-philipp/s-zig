@@ -48,6 +48,34 @@
 #include <stdio.h>
 #include <stdbool.h>
 
+
+
+#define OPCODE_SET_MAC 1
+#define OPCODE_SET_IP 2
+#define OPCODE_SET_DNS 3
+#define OPCODE_SET_SUBNET 4
+#define OPCODE_SET_GATEWAY 5
+#define OPCODE_SET_DHCP_ON 6
+#define OPCODE_RENEW_DHCP_LEASE 7
+#define OPCODE_GET_IP 8
+#define OPCODE_GET_DNS 9
+#define OPCODE_GET_SUBNET 10
+#define OPCODE_GET_GATEWAY 11
+
+#define OPCODE_CONNECT_TO_HOST 12
+#define OPCODE_CONNECT_TO_IP 13
+#define OPCODE_TCP_WRITE 14
+#define OPCODE_TCP_AVAILABLE 15
+#define OPCODE_TCP_READ 16
+#define OPCODE_TCP_PEEK 17
+#define OPCODE_TCP_ALIVE 18
+
+#define OPCODE_TCP_SERVER_START 19
+#define OPCODE_GET_TCP_SERVER_CONNECTIONS 20
+#define OPCODE_TCP_SERVER_WRITE 21
+
+
+
 //#define INTERVAL (CLOCK_SECOND/2)
 #define SERVER_NOT_CONNECTED 0
 #define SERVER_CONNECTED 1
@@ -91,7 +119,11 @@ struct arduinoServer {
 
 struct connection {
 	uint8_t state = STATE_FREE;
-	unsigned char timer;
+
+	uip_ipaddr_t ripaddr;
+	uint16_t rport;
+	uint16_t lport;
+
 	// Psock Read Buffer
 	uint8_t tcpRx_Buffer[TCP_RX_BUFFER_SIZE];
 	uint8_t tcpRx_Pointer = 0;
@@ -102,8 +134,9 @@ struct connection {
 	struct psock ps_in, ps_out;
 };
 
-
-time_t tcpReceiveStartTime = 0;
+// Serial RPC Vars
+static uint8_t payloadLength = -1;
+static uint8_t opCode = -1;
 
 struct connection connections[MAX_CONNECTIONS];                                     
 struct arduinoServer arduinoServers[MAX_SERVER];    
@@ -126,6 +159,7 @@ PT_THREAD(handle_input(struct connection *c))
 			if(uip_len > (TCP_RX_BUFFER_SIZE - c->tcpRx_Pointer) && ! c->state == STATE_ARDUINO_CALLBACK_TIMED_OUT)
 			{
 				c->state = STATE_RECEIVING_TCP_DATA;
+				serial_appcall(c);
 			}
 			else
 			{
@@ -173,24 +207,23 @@ PT_THREAD(handle_output(struct connection *c))
 static void
 handle_connection(struct connection *c)
 {
-	// TODO while State == warte noch auf Daten auf einer TCP Verbindung
+	// while State == warte noch auf Daten auf einer TCP Verbindung
 	// time_t myTime = clock_time(); 
 	// watchdog_periodic() Wenn der Timeout über 1 Sekunde dauert (1000* Clock_Seconds).
 	// Wenn Timeout dann aus der handle_connection rausspringen
-	
-	if(tcpReceiveStartTime == 0) tcpReceiveStartTime = clock_time();
 
+	time_t tcpReceiveStartTime = clock_time();
 
 	do{
 		if(clock_time() - tcpReceiveStartTime > 500) c->state = STATE_ARDUINO_CALLBACK_TIMED_OUT;
-
+		
+		// TODO check Serial input for Callback
 		handle_input(c);
-		handle_output(c);
 
 		watchdog_periodic();
 	} while (c->state == STATE_RECEIVING_TCP_DATA);
 
-	tcpReceiveStartTime = 0;
+	handle_output(c);
 }
 /*---------------------------------------------------------------------------*/
 PROCESS(plastic_sense_process, "plastic sense process");
@@ -241,6 +274,10 @@ void tcp_appcall(void *state){
 		for(i = 0; i < MAX_CONNECTIONS; i++) {
 			if(connections[i]->state == STATE_FREE){
 				connections[i]->state = STATE_IDLE;
+				connections[i]->ripaddr = uip_conn->ripaddr;
+				connections[i]->lport = uip_conn->lport;
+				connections[i]->rport = uip_conn->rport;
+
 				c = &connections[i];
 			}
 		}
@@ -272,10 +309,26 @@ void clearConnection(struct connection *c){
 	// TODO check
 	c->tcpRx_Pointer = 0;
 	c->tcpTx_Pointer = 0;
-
 }
 /*---------------------------------------------------------------------------*/
-void serial_appcall(data){
+// Called if some Data arrived via UART or too much to buffer TCP Data is held in uip_buf
+void serial_appcall(state){
+	// timeout
+
+	
+		
+	if(ringbuf_elements(serialRx_Buffer) > 0 && opCode == -1){
+		opcode = ringbuf_get(serialRx_Buffer);
+	}
+	if(ringbuf_elements(serialRx_Buffer) > 0 && opCode > -1 && payloadLength == -1){
+		payloadLength = ringbuf_get(serialRx_Buffer);
+	}
+	if(ringbuf_elements(serialRx_Buffer) == payloadLength && payloadLength > -1){
+		decodeSerialCommand();
+	}
+
+
+	return;
 
 	// TODO Magic
 	/*
@@ -290,8 +343,76 @@ void serial_appcall(data){
 
 }
 
+
 /*---------------------------------------------------------------------------*/
 
+void decodeSerialCommand(){
+	switch(opCode) {
+		case OPCODE_SET_MAC:
+			// TODO
+			// uint8_t mac_address[8] EEMEM = {0x02, 0x11, 0x22, 0xff, 0xfe, 0x33, 0x44, 0x55};
+		case OPCODE_CONNECT_TO_IP:
+			uint8_t ip[16];
+			uint8_t i = 0;
+			for( i = 0; i < 16; i++){
+				ip[i] = ringbuf_get(serialRx_Buffer);
+			}
+			uint16_t port;
+			port = ringbuf_get(serialRx_Buffer) << 8;
+			port = ringbuf_get(serialRx_Buffer) || port;
+			tcp_connect(ip, UIP_HTONS(port), NULL);
+			uart0_writeb(OPCODE_CONNECT_TO_IP);
+		break;
+		case OPCODE_TCP_WRITE:
+			uint8_t ip[16];
+                        uint8_t i = 0;
+                        for( i = 0; i < 16; i++){
+                                ip[i] = ringbuf_get(serialRx_Buffer);
+                        }
+                        uint16_t port;
+                        port = ringbuf_get(serialRx_Buffer) << 8;
+                        port = ringbuf_get(serialRx_Buffer) || port;
+
+			struct connection *c;
+			for( i = 0; i < MAX_CONNECTIONS; i++){
+				if(connections[i]->ripaddr == ip && connections[i]->rport == port){
+					c = &connections[i];
+				}
+			}
+			for (i = 0; i < payloadLength; i++){
+				c->tcpTx_Buffer[c->tcpTx_Pointer] = ringbuf_get(serialRx_Buffer);
+				c->tcpTx_Pointer++;
+			}
+			uart0_writeb(OPCODE_TCP_WRITE);
+		break;
+		case OPCODE_TCP_AVAILABLE:
+			uint8_t ip[16];
+                        uint8_t i = 0;
+                        for( i = 0; i < 16; i++){
+                                ip[i] = ringbuf_get(serialRx_Buffer);
+                        }
+                        uint16_t port;
+                        port = ringbuf_get(serialRx_Buffer) << 8;
+                        port = ringbuf_get(serialRx_Buffer) || port;
+
+                        struct connection *c;
+                        for( i = 0; i < MAX_CONNECTIONS; i++){
+                                if(connections[i]->ripaddr == ip && connections[i]->rport == port){
+                                        c = &connections[i];
+                                }
+                        }
+			uart0_writeb(OPCODE_TCP_AVAILABLE);
+			uart0_writeb(ringbuf_elements(serialRx_Buffer));
+		break;
+
+	}
+
+	opCode = -1;
+	payloadLength = -1;
+}
+
+
+/*---------------------------------------------------------------------------*/
 void addConnection(uint8_t isServer, uint16_t port, uip_ipaddr_t addr){
 
 	if(isServer == 1){
