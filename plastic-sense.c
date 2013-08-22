@@ -75,6 +75,7 @@
 #define OPCODE_TCP_SERVER_WRITE 21
 
 
+#define OPCODE_CALLBACK 22
 
 //#define INTERVAL (CLOCK_SECOND/2)
 #define SERVER_NOT_CONNECTED 0
@@ -126,12 +127,12 @@ struct connection {
 };
 
 // FunDefs
-struct *getConnectionFromRIpRPort(); // TODO check
-void decodeSerialCommand();
+struct connection *getConnectionFromRIpRPort(); // TODO check
+int8_t decodeSerialCommand(void *state);
 void callback(uint8_t d);
 void clearConnection(struct connection *c);
 void tcp_appcall(void *state);
-void serial_appcall(void *state);
+int8_t serial_appcall(void *state);
 void callArduino(struct connection *c);
 
 // Serial RPC Vars
@@ -148,36 +149,34 @@ PT_THREAD(handle_input(struct connection *c))
 	
 	PSOCK_BEGIN(p);
 	
-	while(1){
-		PSOCK_WAIT_UNTIL(p, PSOCK_NEWDATA(p));
-		
-		// if something arrived notify the Arduino
-		if(uip_len > 0){
-			if(c->state == STATE_IDLE) callArduino(c);
-		
-		
-			if(uip_len > (TCP_RX_BUFFER_SIZE - c->tcpRx_Pointer) && ! c->state == STATE_ARDUINO_CALLBACK_TIMED_OUT)
-			{
-				c->state = STATE_RECEIVING_TCP_DATA;
-				serial_appcall(c);
-			}
-			else // wenn die Daten in den Puffer passen ODER der STATE_ARDUINO_CALLBACK_TIMED_OUT erreicht wurde
-			{
-				// memcpy( &dst[dstIdx], &src[srcIdx], numElementsToCopy * sizeof( Element ) );
-				uint8_t len = uip_len;
-				if(uip_len > TCP_RX_BUFFER_SIZE - c->tcpRx_Pointer){
-					len = TCP_RX_BUFFER_SIZE - c->tcpRx_Pointer;
-				}
-				memcpy(&c->tcpRx_Buffer[c->tcpRx_Pointer], &uip_buf, len);
-				c->tcpRx_Pointer = c->tcpRx_Pointer + len;
+	fprintf(stderr, "handle_input");
 
-				c->state = STATE_IDLE;
-			}
-	
+
+	clock_time_t tcpReceiveStartTime = clock_time();
+	int8_t returnCode = 0;
+	do{
+		PSOCK_READBUF(p);
+		callArduino(c);
+		c->tcpRx_Pointer = PSOCK_DATALEN(p);
+
+		if(returnCode == 0 && uip_datalen() < TCP_RX_BUFFER_SIZE){
+			return;
 		}
 
-			
-	}
+		
+		while(clock_time() - tcpReceiveStartTime < 500){
+			returnCode += serial_appcall(c);
+			if(returnCode > 0){
+				uart0_writeb(OPCODE_TCP_READ);
+				uart0_writeb(c->tcpRx_Pointer);
+				for(uint8_t i = 0; i < c->tcpRx_Pointer; i++){
+					uart0_writeb(c->tcpRx_Buffer[i]);
+				}
+				c->tcpRx_Pointer = 0;
+				break;
+			}
+		}
+	} while(1);
 	
 	
   	PSOCK_CLOSE(p);
@@ -192,10 +191,9 @@ PT_THREAD(handle_output(struct connection *c))
 	PSOCK_BEGIN(p);
 	
 	while(1){
-		if(c->tcpTx_Pointer > 0){
-			PSOCK_SEND(p, c->tcpTx_Buffer, c->tcpTx_Pointer);
-			c->tcpTx_Pointer = 0;
-		}
+		PSOCK_WAIT_UNTIL(p, c->tcpTx_Pointer > 0)
+		PSOCK_SEND(p, c->tcpTx_Buffer, c->tcpTx_Pointer);
+		c->tcpTx_Pointer = 0;
 	}
 	PSOCK_CLOSE(p);
 	PSOCK_END(p);
@@ -208,16 +206,11 @@ handle_connection(struct connection *c)
 	// time_t myTime = clock_time(); 
 	// watchdog_periodic() Wenn der Timeout über 1 Sekunde dauert (1000* Clock_Seconds).
 	// Wenn Timeout dann aus der handle_connection rausspringen
+	fprintf(stderr, "handle_connection");
 
-	time_t tcpReceiveStartTime = clock_time();
-
-	do{
-		if(clock_time() - tcpReceiveStartTime > 500) c->state = STATE_ARDUINO_CALLBACK_TIMED_OUT;
 		
-		handle_input(c);
+	handle_input(c);
 
-		watchdog_periodic(); // TODO check imports!
-	} while (c->state == STATE_RECEIVING_TCP_DATA);
 
 	handle_output(c);
 }
@@ -227,14 +220,12 @@ AUTOSTART_PROCESSES(&plastic_sense_process);
 /*---------------------------------------------------------------------------*/
 PROCESS_THREAD(plastic_sense_process, ev, data)
 {
-
 	// TODO initialize connections
   	PROCESS_BEGIN();
 
-	uart0_set_input(callback);
   	ringbuf_init(&serialRx_Buffer, serialRx, sizeof(serialRx));
-	
-	
+	uart0_set_input(callback);
+
 	while(1) {
 		PROCESS_WAIT_EVENT();
 		if(ev == tcpip_event){
@@ -259,6 +250,7 @@ void callback(uint8_t d){
 void tcp_appcall(void *state){
 	struct connection *c = (struct connection *)state;
 	
+	fprintf(stderr, "tcp_appcall");
 	if(uip_closed() || uip_aborted() || uip_timedout()) {
 		if(c != NULL) {
 			// free Connection c
@@ -276,6 +268,7 @@ void tcp_appcall(void *state){
 				connections[i].rport = uip_conn->rport;
 
 				c = &connections[i];
+				break;
 			}
 		}
 		if(i == MAX_CONNECTIONS) {
@@ -294,7 +287,7 @@ void tcp_appcall(void *state){
 			uip_abort();
 			return;
 		}
-		
+		fprintf(stderr, "--Test--");
 		handle_connection(c);
 	} else {
 		uip_abort();
@@ -309,7 +302,7 @@ void clearConnection(struct connection *c){
 }
 /*---------------------------------------------------------------------------*/
 // Called if some Data arrived via UART or too much to buffer TCP Data is held in uip_buf
-void serial_appcall(void *state){
+int8_t serial_appcall(void *state){
 	// timeout
 
 	
@@ -321,11 +314,11 @@ void serial_appcall(void *state){
 		payloadLength = ringbuf_get(&serialRx_Buffer);
 	}
 	if(ringbuf_elements(&serialRx_Buffer) == payloadLength && payloadLength < 255){
-		decodeSerialCommand();
+		return decodeSerialCommand(state);
 	}
 
 
-	return;
+	return -1;
 
 	// TODO Magic
 	/*
@@ -343,7 +336,8 @@ void serial_appcall(void *state){
 
 /*---------------------------------------------------------------------------*/
 
-void decodeSerialCommand(){
+int8_t decodeSerialCommand(void *state){
+	struct connection *s = (struct connection *)state;
 	switch(opCode) {
 		case OPCODE_SET_MAC:
 			// TODO
@@ -397,7 +391,7 @@ void decodeSerialCommand(){
 
 			uart0_writeb(OPCODE_TCP_AVAILABLE);
 			uart0_writeb(0x01);
-			if(c->STATE_RECEIVING_TCP_DATA){
+			if(c->state == STATE_RECEIVING_TCP_DATA){
 				uart0_writeb(uip_len + c->tcpRx_Pointer);
 			}else{
 				uart0_writeb(c->tcpRx_Pointer);
@@ -408,31 +402,27 @@ void decodeSerialCommand(){
                         struct connection *c;
 			c = (struct connection *) getConnectionFromRIpRPort();
 
-			uart0_writeb(OPCODE_TCP_READ);
-			if(c->STATE_RECEIVING_TCP_DATA){
-				uart0_writeb(uip_len + c->tcpRx_Pointer);
-			}else{
-				uart0_writeb(c->tcpRx_Pointer);
-			}
 			
+			opCode = -1;
+			payloadLength = 255;
+			
+			if(s != NULL && memcmp(c,s, sizeof(struct connection)) == 0) return 1;
+
+
+			uart0_writeb(OPCODE_TCP_READ);
+			uart0_writeb(c->tcpRx_Pointer);
 			uint8_t i = 0;
 			for ( i = 0; i < c->tcpRx_Pointer; i++){
 				uart0_writeb(c->tcpRx_Buffer[i]);
 			}
 			c->tcpRx_Pointer = 0;
 
-			if(c->state == STATE_RECEIVING_TCP_DATA){
-				for ( i = 0; i < uip_len; i++){
-					uart0_writeb(uip_buf[i]);
-				}
-				c->state = STATE_IDLE;
-			}
 		break;
 		}
 		case OPCODE_TCP_SERVER_START: {
 		       	uint16_t port;
 		        port = ringbuf_get(&serialRx_Buffer) << 8;
-		        port = ringbuf_get(&serialRx_Buffer) || port;
+		        port = ringbuf_get(&serialRx_Buffer) | port;
 	
 			tcp_listen(UIP_HTONS(port));
 	
@@ -452,8 +442,8 @@ void decodeSerialCommand(){
 			for(i = 0; i < MAX_CONNECTIONS; i++){
 				if ( connections[i].lport == port ) {
 					
-					for ( i = 15; i >= 0; i--){
-						uint8_t b = (uint8_t) (connections[i].ripaddr >> (i * 8));
+					for ( i = sizeof(connections[i].ripaddr.u8); i >= 0; i--){
+						uint8_t b = connections[i].ripaddr.u8[i];
 						uart0_writeb(b);
 					}
 					uart0_writeb((uint8_t) connections[i].rport >> 8);
@@ -466,36 +456,37 @@ void decodeSerialCommand(){
 
 	opCode = -1;
 	payloadLength = 255;
+	return 0;
 }
 
 
 /*---------------------------------------------------------------------------*/
-struct *getConnectionFromRIpRPort(){
-	uint8_t ip[16];
+struct connection *getConnectionFromRIpRPort(){
+	uint8_t ip[sizeof(uip_ipaddr_t)];
         uint8_t i = 0;
-	for( i = 0; i < 16; i++){
+	for( i = 0; i < sizeof(ip); i++){
       		ip[i] = ringbuf_get(&serialRx_Buffer);
         }
         uint16_t port;
         port = ringbuf_get(&serialRx_Buffer) << 8;
         port = ringbuf_get(&serialRx_Buffer) || port;
 
-        struct connection *c;
+        struct connection *c = NULL;
         for( i = 0; i < MAX_CONNECTIONS; i++){
-		if(memcmp(connections[i]->ripaddr, ip, sizeof(ip)) == 0 && connections[i]->rport == port){ // TODO memcmp manpage nachsehen
+		if(memcmp(connections[i].ripaddr.u8, ip, sizeof(ip)) == 0 && connections[i].rport == port){ // TODO memcmp manpage nachsehen
 						uart0_writeb(0x12);
 						c = &connections[i];
 		}
+	}
 	return c;
 }
 /*---------------------------------------------------------------------------*/
 void callArduino(struct connection *c){
 	// Send Message to Arduino that some Data arrived via TCP
 	uart0_writeb(OPCODE_CALLBACK);
-	uart0_writeb(0x12); // 0x12 == 0d18
-	uint8_t i = 0;
-	for ( i = 15; i >= 0; i--){
-		uint8_t b = (uint8_t) (c->ripaddr >> (i * 8))
+	uart0_writeb(0x12); // 0x12 == 0d18 // set site according to ip Version
+	for ( uint8_t i=0; i<sizeof(uip_ipaddr_t); i++) {
+		uint8_t b = c->ripaddr.u8[i];
 		uart0_writeb(b);
 	}
 	uart0_writeb((uint8_t) c->rport >> 8);
