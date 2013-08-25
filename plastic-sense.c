@@ -149,7 +149,7 @@ PT_THREAD(handle_input(struct connection *c))
 	
 	PSOCK_BEGIN(p);
 	
-	fprintf(stderr, "handle_input");
+	fprintf(stderr, "handle_input\n");
 
 
 	clock_time_t tcpReceiveStartTime = clock_time();
@@ -164,7 +164,7 @@ PT_THREAD(handle_input(struct connection *c))
 		}
 
 		
-		while(clock_time() - tcpReceiveStartTime < 500){
+		while(clock_time() - tcpReceiveStartTime < 200){
 			returnCode += serial_appcall(c);
 			if(returnCode > 0){
 				uart0_writeb(OPCODE_TCP_READ);
@@ -206,7 +206,7 @@ handle_connection(struct connection *c)
 	// time_t myTime = clock_time(); 
 	// watchdog_periodic() Wenn der Timeout über 1 Sekunde dauert (1000* Clock_Seconds).
 	// Wenn Timeout dann aus der handle_connection rausspringen
-	fprintf(stderr, "handle_connection");
+	fprintf(stderr, "handle_connection\n");
 
 		
 	handle_input(c);
@@ -228,6 +228,7 @@ PROCESS_THREAD(plastic_sense_process, ev, data)
 
 	while(1) {
 		PROCESS_WAIT_EVENT();
+		fprintf(stderr, "RUN Plastic Sense Process\n");
 		if(ev == tcpip_event){
 			tcp_appcall(data);
 		}
@@ -250,7 +251,7 @@ void callback(uint8_t d){
 void tcp_appcall(void *state){
 	struct connection *c = (struct connection *)state;
 	
-	fprintf(stderr, "tcp_appcall");
+	fprintf(stderr, "tcp_appcall\n");
 	if(uip_closed() || uip_aborted() || uip_timedout()) {
 		if(c != NULL) {
 			// free Connection c
@@ -264,8 +265,8 @@ void tcp_appcall(void *state){
 			if(connections[i].state == STATE_FREE){
 				connections[i].state = STATE_IDLE;
 				connections[i].ripaddr = uip_conn->ripaddr;
-				connections[i].lport = uip_conn->lport;
-				connections[i].rport = uip_conn->rport;
+				connections[i].lport = UIP_HTONS(uip_conn->lport);
+				connections[i].rport = UIP_HTONS(uip_conn->rport);
 
 				c = &connections[i];
 				break;
@@ -287,7 +288,6 @@ void tcp_appcall(void *state){
 			uip_abort();
 			return;
 		}
-		fprintf(stderr, "--Test--");
 		handle_connection(c);
 	} else {
 		uip_abort();
@@ -340,15 +340,18 @@ int8_t decodeSerialCommand(void *state){
 	struct connection *s = (struct connection *)state;
 	switch(opCode) {
 		case OPCODE_SET_MAC:
+			fprintf(stderr, "decode: OPCODE_SET_MAC\n");
 			// TODO
 			// uint8_t mac_address[8] EEMEM = {0x02, 0x11, 0x22, 0xff, 0xfe, 0x33, 0x44, 0x55};
 		break;
 		case OPCODE_SET_IP:
+			fprintf(stderr, "decode: OPCODE_SET_IP\n");
 			// uip_ipaddr_t addr;
 			// uip_ipaddr(&addr, 192,168,1,2);
 			// uip_sethostaddr(&addr);
 		break;
 		case OPCODE_CONNECT_TO_IP: {
+			fprintf(stderr, "decode: OPCODE_CONNECT_TO_IP\n");
 			uint16_t ip[8];
 			uint8_t i = 0;
 			for( i = 0; i < 8; i++){
@@ -358,7 +361,7 @@ int8_t decodeSerialCommand(void *state){
 			}
 			uint16_t port;
 			port = ringbuf_get(&serialRx_Buffer) << 8;
-			port = ringbuf_get(&serialRx_Buffer) || port;
+			port = ringbuf_get(&serialRx_Buffer) | port;
 			
 			uart0_writeb(OPCODE_CONNECT_TO_IP);
 			uart0_writeb(0x01);
@@ -374,6 +377,7 @@ int8_t decodeSerialCommand(void *state){
 		break;
 		}
 		case OPCODE_TCP_WRITE: {
+			fprintf(stderr, "decode: OPCODE_TCP_WRITE\n");
                         struct connection *c;
 			c = (struct connection *) getConnectionFromRIpRPort();
 
@@ -386,6 +390,7 @@ int8_t decodeSerialCommand(void *state){
 		break;
 		}
 		case OPCODE_TCP_AVAILABLE: {
+			fprintf(stderr, "decode: OPCODE_TCP_AVAILABLE\n");
                         struct connection *c;
 			c = (struct connection *) getConnectionFromRIpRPort();
 
@@ -399,6 +404,7 @@ int8_t decodeSerialCommand(void *state){
 		break;
 		}
 		case OPCODE_TCP_READ: {
+			fprintf(stderr, "decode: OPCODE_TCP_READ\n");
                         struct connection *c;
 			c = (struct connection *) getConnectionFromRIpRPort();
 
@@ -406,20 +412,34 @@ int8_t decodeSerialCommand(void *state){
 			opCode = -1;
 			payloadLength = 255;
 			
-			if(s != NULL && memcmp(c,s, sizeof(struct connection)) == 0) return 1;
+			if(s != NULL && memcmp(c,s, sizeof(struct connection)) == 0){
+				fprintf(stderr, "decode: OPCODE_TCP_READ from: HANDLE_INPUT\n");
+				return 1;
+			}
+
+			
+			fprintf(stderr, "decode: OPCODE_TCP_READ from: SERIAL_APPCALL\n");
+		
+			fprintf(stderr, "TEST: %p\n", c);
 
 
 			uart0_writeb(OPCODE_TCP_READ);
+			fprintf(stderr, "uart opcode: %d\n", OPCODE_TCP_READ);
 			uart0_writeb(c->tcpRx_Pointer);
+			fprintf(stderr, "uart length: %d\n", c->tcpRx_Pointer);
 			uint8_t i = 0;
+			fprintf(stderr, "Data: ");
 			for ( i = 0; i < c->tcpRx_Pointer; i++){
+				fprintf(stderr, "%c_", c->tcpRx_Buffer[i]);
 				uart0_writeb(c->tcpRx_Buffer[i]);
 			}
+			fprintf(stderr, "\n");
 			c->tcpRx_Pointer = 0;
 
 		break;
 		}
 		case OPCODE_TCP_SERVER_START: {
+			fprintf(stderr, "decode: OPCODE_TCP_SERVER_START");
 		       	uint16_t port;
 		        port = ringbuf_get(&serialRx_Buffer) << 8;
 		        port = ringbuf_get(&serialRx_Buffer) | port;
@@ -431,9 +451,10 @@ int8_t decodeSerialCommand(void *state){
 		break;
 		}
 		case OPCODE_GET_TCP_SERVER_CONNECTIONS: {
+			fprintf(stderr, "decode: OPCODE_TCP_SERVER_CONNECTIONS");
 		       	uint16_t port;
 		        port = ringbuf_get(&serialRx_Buffer) << 8;
-		        port = ringbuf_get(&serialRx_Buffer) || port;
+			port = ringbuf_get(&serialRx_Buffer) | port;
 			
 			uart0_writeb(OPCODE_GET_TCP_SERVER_CONNECTIONS);
 			uart0_writeb(0x12);
@@ -466,15 +487,15 @@ struct connection *getConnectionFromRIpRPort(){
         uint8_t i = 0;
 	for( i = 0; i < sizeof(ip); i++){
       		ip[i] = ringbuf_get(&serialRx_Buffer);
+		//fprintf(stderr, "%x", ip[i]);
         }
         uint16_t port;
         port = ringbuf_get(&serialRx_Buffer) << 8;
-        port = ringbuf_get(&serialRx_Buffer) || port;
+        port = ringbuf_get(&serialRx_Buffer) | port;
 
         struct connection *c = NULL;
         for( i = 0; i < MAX_CONNECTIONS; i++){
 		if(memcmp(connections[i].ripaddr.u8, ip, sizeof(ip)) == 0 && connections[i].rport == port){ // TODO memcmp manpage nachsehen
-						uart0_writeb(0x12);
 						c = &connections[i];
 		}
 	}
@@ -482,15 +503,22 @@ struct connection *getConnectionFromRIpRPort(){
 }
 /*---------------------------------------------------------------------------*/
 void callArduino(struct connection *c){
+	fprintf(stderr, "callArduino() called\n");
 	// Send Message to Arduino that some Data arrived via TCP
 	uart0_writeb(OPCODE_CALLBACK);
 	uart0_writeb(0x12); // 0x12 == 0d18 // set site according to ip Version
 	for ( uint8_t i=0; i<sizeof(uip_ipaddr_t); i++) {
 		uint8_t b = c->ripaddr.u8[i];
 		uart0_writeb(b);
+		fprintf(stderr, "%x ", b);
 	}
-	uart0_writeb((uint8_t) c->rport >> 8);
-	uart0_writeb((uint8_t) c->rport);
+	fprintf(stderr, "Callback for R-Port: %u\n", c->rport);
+	//uart0_writeb((uint8_t) c->rport)
+	uint8_t port_msb = c->rport >> 8;
+	uint8_t port_lsb = c->rport;
+
+	uart0_writeb(port_msb);
+	uart0_writeb(port_lsb);
 }
 /*---------------------------------------------------------------------------*/
 
