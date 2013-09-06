@@ -202,10 +202,6 @@ PT_THREAD(handle_output(struct connection *c))
 static void
 handle_connection(struct connection *c)
 {
-	// while State == warte noch auf Daten auf einer TCP Verbindung
-	// time_t myTime = clock_time(); 
-	// watchdog_periodic() Wenn der Timeout über 1 Sekunde dauert (1000* Clock_Seconds).
-	// Wenn Timeout dann aus der handle_connection rausspringen
 	fprintf(stderr, "handle_connection\n");
 
 		
@@ -235,7 +231,6 @@ PROCESS_THREAD(plastic_sense_process, ev, data)
 		else if (ev == PROCESS_EVENT_POLL){
 			//handle Serial callback
 			serial_appcall(data);
-			// handle_output() mit der richtigen Verbindung aufrufen -> nicht notwendig da serial_appcall die Daten aus uip_buf versendet wenn die bereffende Verbindung noch in STATE_RECEIVING_TCP_DATA ist. 
 		}
 	}
 
@@ -324,17 +319,6 @@ int8_t serial_appcall(void *state){
 
 	return -1;
 
-	// TODO Magic
-	/*
-	
-	decode serial line commands
-	 |-> add/remove connections
-	 |-> Add something to the tcp_Tx Buffers
-	 |-> Read something from the tcp_Rx Buffers
-		-> check if any connection State is STATE_RECEIVING_TCP_DATA if so send Arduino the connection->tcpRx_Buffer PLUS the uip_buf (set the connection state to idle and the pointers to 0)
-	 
-	 */
-
 }
 
 
@@ -346,10 +330,10 @@ int8_t decodeSerialCommand(void *state){
 		case OPCODE_SET_MAC:
 			fprintf(stderr, "decode: OPCODE_SET_MAC\n");
 			// TODO
-			// uint8_t mac_address[8] EEMEM = {0x02, 0x11, 0x22, 0xff, 0xfe, 0x33, 0x44, 0x55};
 		break;
 		case OPCODE_SET_IP:
 			fprintf(stderr, "decode: OPCODE_SET_IP\n");
+			// TODO
 			// uip_ipaddr_t addr;
 			// uip_ipaddr(&addr, 192,168,1,2);
 			// uip_sethostaddr(&addr);
@@ -466,6 +450,7 @@ int8_t decodeSerialCommand(void *state){
 			port = ringbuf_get(&serialRx_Buffer) | port;
 			
 			uart0_writeb(OPCODE_GET_TCP_SERVER_CONNECTIONS);
+			// TODO adapt payloadLength according to the Number of clients
 			uart0_writeb(0x12);
 
 			int8_t i = 0;
@@ -522,7 +507,6 @@ void callArduino(struct connection *c){
 		fprintf(stderr, "%x ", b);
 	}
 	fprintf(stderr, "Callback for R-Port: %u\n", c->rport);
-	//uart0_writeb((uint8_t) c->rport)
 	uint8_t port_msb = c->rport >> 8;
 	uint8_t port_lsb = c->rport;
 
