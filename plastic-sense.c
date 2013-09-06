@@ -253,12 +253,14 @@ void tcp_appcall(void *state){
 	
 	fprintf(stderr, "tcp_appcall\n");
 	if(uip_closed() || uip_aborted() || uip_timedout()) {
+		fprintf(stderr, "connection lost.\n");
 		if(c != NULL) {
 			// free Connection c
 			clearConnection(c);
 		}
 	} else if(uip_connected()){ // ?! -> && c == NULL) {
 	
+		fprintf(stderr, "configuring new connection.\n");
 		int i = 0;
 		// Add new Connection (= mark one free Connection as non-free)
 		for(i = 0; i < MAX_CONNECTIONS; i++) {
@@ -288,8 +290,10 @@ void tcp_appcall(void *state){
 			uip_abort();
 			return;
 		}
+		fprintf(stderr, "handling connection\n");
 		handle_connection(c);
-	} else {
+	} else {	
+		fprintf(stderr, "SHOULD NOT HAPPEN\n");
 		uip_abort();
 	}
 }
@@ -354,14 +358,19 @@ int8_t decodeSerialCommand(void *state){
 			fprintf(stderr, "decode: OPCODE_CONNECT_TO_IP\n");
 			uint16_t ip[8];
 			uint8_t i = 0;
+			fprintf(stderr, "IP: ");
 			for( i = 0; i < 8; i++){
 				ip[i] = ringbuf_get(&serialRx_Buffer);
 				ip[i] = ip[i] << 8;
 				ip[i] = ip[i] | ringbuf_get(&serialRx_Buffer);
+
+				fprintf(stderr, "%x:", ip[i]);
 			}
+			fprintf(stderr, "\n");
 			uint16_t port;
 			port = ringbuf_get(&serialRx_Buffer) << 8;
 			port = ringbuf_get(&serialRx_Buffer) | port;
+			fprintf(stderr, "Port: %d\n", port);
 			
 			uart0_writeb(OPCODE_CONNECT_TO_IP);
 			uart0_writeb(0x01);
