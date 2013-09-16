@@ -19,6 +19,7 @@ class TestSuite(unittest.TestCase):
 				while len(localIpAddr) < 8:
 					localIpAddr.insert(i, '0000')
 			if len(localIpAddr[i]) < 4:
+				# TODO fix e.g. 003f
 				localIpAddr[i] = '0' + localIpAddr[i]
 		returnValue = []
 		for i in range(0, len(localIpAddr)):
@@ -36,7 +37,8 @@ class TestSuite(unittest.TestCase):
 	# connect to Server send and recieve some Data
 	def test_connectToServer(self):
 		#create an INET, STREAMing socket
-		serversocket = socket(AF_INET6, SOCK_STREAM)
+		serverSocket = socket(AF_INET6, SOCK_STREAM)
+		serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
     		#bind the socket to a public host,
     		# and a well-known port
 
@@ -54,44 +56,61 @@ class TestSuite(unittest.TestCase):
 		# print "".join([hex(ord(x))[2:] for x in ip])
 		localIpAddr = "".join([x + ":" for x in localIpAddr])
 		localIpAddr = localIpAddr[0:len(localIpAddr)-1]
-		print localIpAddr
+		print "Python: Local IP Address: " + localIpAddr
 		
 		#TODO get Python listening on tap0
-		serversocket.bind((localIpAddr, 8000,0,0))
-		#become a server socket
-    		serversocket.listen(5)
-		return
-	
-		stop = False
-		#time.sleep(0.1)
-		def foo():
-			print "Python: establishing Connection."
-			(clientsocket, address) = serversocket.accept()
-			print "Python: Connection established"
-			while not stop:
-				time.sleep(1)
+		# serversocket.bind((localIpAddr, 8000,0,0))
+		serverSocket.bind(('', 8000))
+		serverSocket.listen(5)
 		
-		t = Thread(target=foo, args=())
+		clientSocket = None
+		clientAddress = None
+		ip = self.getIp()
+		#time.sleep(0.1)
+		def foo(clientSocket, clientAdress, ip, self):
+			print "Python: establishing Connection."
+			(clientSocket, clientAddress) = serverSocket.accept()
+			print "Python: Connection established"
+		
+			time.sleep(3)
+			
+			# let the Jennic send some btes via tcp
+			payload = "blaaa"
+			print "Python: send Jennic some bytes to transmit."
+			self.p.stdin.write(struct.pack(">BB16BH5s", 14,23,ip[0],ip[1],ip[2],ip[3],ip[4],ip[5],ip[6],ip[7],ip[8],ip[9],ip[10],ip[11],ip[12],ip[13],ip[14],ip[15],port,payload))
+			time.sleep(1)
+			opcode,length=struct.unpack(">BB", self.p.stdout.read(2))
+			print "Python: opcode: ", opcode, " length: ", length
+			time.sleep(1)
+			recievedPayload = clientSocket.recv(128)
+			print "Python: socket recieved: " , recievedPayload
+			self.assertTrue(True)
+		
+		t = Thread(target=foo, args=(clientSocket, clientAddress,ip,self))
 		t.start()
 		print "Python: Setup Python Server on Port 8000"
-	
+		time.sleep(0.2)
 		
-		ip = self.getIp()
 		port = 8000
 		self.p.stdin.write(struct.pack(">BB16BH", 13,18,ip[0],ip[1],ip[2],ip[3],ip[4],ip[5],ip[6],ip[7],ip[8],ip[9],ip[10],ip[11],ip[12],ip[13],ip[14],ip[15],port))
-		print "Python: send Jennic opdcode to connect to Server"
+		print "Python: send Jennic opcode to connect to Server"
+
+		# Join the listenin Thread back in the main thread
+		# t.join()
 
 
 		self.assertTrue(struct.unpack(">BBB", self.p.stdout.read(3)) == (13, 1, 1))
 		print "Python: got connection established from Jennic"
 		
-		time.sleep(3)
-		stop = True
+		
+		# time.sleep(6)
+		while True:
+			time.sleep(2)
 
 
 	# Test Case:
 	# Start Server, Recieve some TCP Data, Send some TCP Data
-	def test_startServer(self):
+	def dont_test_startServer(self):
 		# start TCP_Server on Port 8000
 		self.p.stdin.write(struct.pack(">BBH", 19,2,8000))
 		self.assertTrue(struct.unpack(">BB", self.p.stdout.read(2)) == (19, 0))
@@ -137,6 +156,7 @@ class TestSuite(unittest.TestCase):
 		#while True:
 		#	time.sleep(0.01)
 
+		# let the Jennic send some bytes back via tcp
 		self.p.stdin.write(struct.pack(">BB16sH7s", 14,25,ip,port,payload[0]))
 		print "Python: Send Opcode to Send Data"
 		time.sleep(1)

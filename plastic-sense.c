@@ -304,15 +304,23 @@ void clearConnection(struct connection *c){
 int8_t serial_appcall(void *state){
 	// timeout
 
-	
+
+	fprintf(stderr, "called: serial_appcall() \n");
 		
 	if(ringbuf_elements(&serialRx_Buffer) > 0 && opCode == -1){
 		opCode = ringbuf_get(&serialRx_Buffer);
+		fprintf(stderr, "set opCode to: %d \n", opCode);
 	}
 	if(ringbuf_elements(&serialRx_Buffer) > 0 && opCode > -1 && payloadLength == 255){
 		payloadLength = ringbuf_get(&serialRx_Buffer);
+		fprintf(stderr, "set payloadLength to: %d \n", payloadLength);
 	}
+	
+	fprintf(stderr, "elements in ringbuf: %d \n", ringbuf_elements(&serialRx_Buffer));
+
+
 	if(ringbuf_elements(&serialRx_Buffer) == payloadLength && payloadLength < 255){
+		fprintf(stderr, "call: decodeSerialCommand() \n");
 		return decodeSerialCommand(state);
 	}
 
