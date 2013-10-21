@@ -35,7 +35,7 @@ class TestSuite(unittest.TestCase):
 
 	# Test Case:
 	# connect to Server send and recieve some Data
-	def test_connectToServer(self):
+	def dont_test_connectToServer(self):
 		#create an INET, STREAMing socket
 		serverSocket = socket(AF_INET6, SOCK_STREAM)
 		serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
@@ -110,7 +110,7 @@ class TestSuite(unittest.TestCase):
 
 	# Test Case:
 	# Start Server, Recieve some TCP Data, Send some TCP Data
-	def dont_test_startServer(self):
+	def test_startServer(self):
 		# start TCP_Server on Port 8000
 		self.p.stdin.write(struct.pack(">BBH", 19,2,8000))
 		self.assertTrue(struct.unpack(">BB", self.p.stdout.read(2)) == (19, 0))

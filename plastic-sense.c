@@ -49,6 +49,13 @@
 #include <stdbool.h>
 
 
+#define DEBUG
+
+#ifdef DEBUG
+#define INFO(...) fprintf(stderr, __VA_ARGS__)
+#else
+#define INFO(...) 
+#endif
 
 #define OPCODE_SET_MAC 1
 #define OPCODE_SET_IP (OPCODE_SET_MAC+1)
@@ -149,7 +156,7 @@ PT_THREAD(handle_input(struct connection *c))
 	
 	PSOCK_BEGIN(p);
 	
-	fprintf(stderr, "handle_input\n");
+	INFO("handle_input\n");
 
 
 	clock_time_t tcpReceiveStartTime = clock_time();
@@ -202,7 +209,7 @@ PT_THREAD(handle_output(struct connection *c))
 static void
 handle_connection(struct connection *c)
 {
-	fprintf(stderr, "handle_connection\n");
+	INFO("handle_connection\n");
 
 		
 	handle_input(c);
@@ -218,13 +225,14 @@ PROCESS_THREAD(plastic_sense_process, ev, data)
 {
 	// TODO initialize connections
   	PROCESS_BEGIN();
-
+	
   	ringbuf_init(&serialRx_Buffer, serialRx, sizeof(serialRx));
 	uart0_set_input(callback);
+	
 
 	while(1) {
 		PROCESS_WAIT_EVENT();
-		fprintf(stderr, "RUN Plastic Sense Process\n");
+		INFO("RUN Plastic Sense Process\n");
 		if(ev == tcpip_event){
 			tcp_appcall(data);
 		}
@@ -246,16 +254,16 @@ void callback(uint8_t d){
 void tcp_appcall(void *state){
 	struct connection *c = (struct connection *)state;
 	
-	fprintf(stderr, "tcp_appcall\n");
+	INFO("tcp_appcall\n");
 	if(uip_closed() || uip_aborted() || uip_timedout()) {
-		fprintf(stderr, "connection lost.\n");
+		INFO("connection lost.\n");
 		if(c != NULL) {
 			// free Connection c
 			clearConnection(c);
 		}
 	} else if(uip_connected()){ // ?! -> && c == NULL) {
 	
-		fprintf(stderr, "configuring new connection.\n");
+		INFO("configuring new connection.\n");
 		int i = 0;
 		// Add new Connection (= mark one free Connection as non-free)
 		for(i = 0; i < MAX_CONNECTIONS; i++) {
@@ -285,10 +293,10 @@ void tcp_appcall(void *state){
 			uip_abort();
 			return;
 		}
-		fprintf(stderr, "handling connection\n");
+		INFO("handling connection\n");
 		handle_connection(c);
 	} else {	
-		fprintf(stderr, "SHOULD NOT HAPPEN\n");
+		INFO("SHOULD NOT HAPPEN\n");
 		uip_abort();
 	}
 }
@@ -305,22 +313,22 @@ int8_t serial_appcall(void *state){
 	// timeout
 
 
-	fprintf(stderr, "called: serial_appcall() \n");
+	INFO("called: serial_appcall() \n");
 		
 	if(ringbuf_elements(&serialRx_Buffer) > 0 && opCode == -1){
 		opCode = ringbuf_get(&serialRx_Buffer);
-		fprintf(stderr, "set opCode to: %d \n", opCode);
+		INFO("set opCode to: %d \n", opCode);
 	}
 	if(ringbuf_elements(&serialRx_Buffer) > 0 && opCode > -1 && payloadLength == 255){
 		payloadLength = ringbuf_get(&serialRx_Buffer);
-		fprintf(stderr, "set payloadLength to: %d \n", payloadLength);
+		INFO("set payloadLength to: %d \n", payloadLength);
 	}
 	
-	fprintf(stderr, "elements in ringbuf: %d \n", ringbuf_elements(&serialRx_Buffer));
+	INFO("elements in ringbuf: %d \n", ringbuf_elements(&serialRx_Buffer));
 
 
 	if(ringbuf_elements(&serialRx_Buffer) == payloadLength && payloadLength < 255){
-		fprintf(stderr, "call: decodeSerialCommand() \n");
+		INFO("call: decodeSerialCommand() \n");
 		return decodeSerialCommand(state);
 	}
 
@@ -335,34 +343,76 @@ int8_t serial_appcall(void *state){
 int8_t decodeSerialCommand(void *state){
 	struct connection *s = (struct connection *)state;
 	switch(opCode) {
-		case OPCODE_SET_MAC:
-			fprintf(stderr, "decode: OPCODE_SET_MAC\n");
+		case OPCODE_SET_MAC: {
+			INFO("decode: OPCODE_SET_MAC\n");
 			// TODO
 		break;
-		case OPCODE_SET_IP:
-			fprintf(stderr, "decode: OPCODE_SET_IP\n");
+		}
+		case OPCODE_SET_IP: {
+			INFO("decode: OPCODE_SET_IP\n");
 			// TODO
 			// uip_ipaddr_t addr;
 			// uip_ipaddr(&addr, 192,168,1,2);
 			// uip_sethostaddr(&addr);
 		break;
+		}
+		case OPCODE_SET_DNS: {
+			// TODO
+		break;
+		}
+		case OPCODE_SET_SUBNET: {
+			// TODO
+		break;
+		}
+		case OPCODE_SET_GATEWAY: {
+			// TODO
+		break;
+		}
+		case OPCODE_SET_DHCP_ON: {
+			// TODO
+		break;
+		}
+		case OPCODE_RENEW_DHCP_LEASE: {
+			// TODO
+		break;
+		}
+		case OPCODE_GET_IP: {
+			// TODO
+		break;
+		}
+		case OPCODE_GET_DNS: {
+			// TODO
+		break;
+		}
+		case OPCODE_GET_SUBNET: {
+			// TODO
+		break;
+		}
+		case OPCODE_GET_GATEWAY: {
+			// TODO
+		break;
+		}
+		case OPCODE_CONNECT_TO_HOST: {
+			// TODO
+		break;
+		}
 		case OPCODE_CONNECT_TO_IP: {
-			fprintf(stderr, "decode: OPCODE_CONNECT_TO_IP\n");
+			INFO("decode: OPCODE_CONNECT_TO_IP\n");
 			uint16_t ip[8];
 			uint8_t i = 0;
-			fprintf(stderr, "IP: ");
+			INFO("IP: ");
 			for( i = 0; i < 8; i++){
 				ip[i] = ringbuf_get(&serialRx_Buffer);
 				ip[i] = ip[i] << 8;
 				ip[i] = ip[i] | ringbuf_get(&serialRx_Buffer);
 
-				fprintf(stderr, "%x:", ip[i]);
+				INFO("%x:", ip[i]);
 			}
-			fprintf(stderr, "\n");
+			INFO("\n");
 			uint16_t port;
 			port = ringbuf_get(&serialRx_Buffer) << 8;
 			port = ringbuf_get(&serialRx_Buffer) | port;
-			fprintf(stderr, "Port: %d\n", port);
+			INFO("Port: %d\n", port);
 			
 			uart0_writeb(OPCODE_CONNECT_TO_IP);
 			uart0_writeb(0x01);
@@ -378,9 +428,15 @@ int8_t decodeSerialCommand(void *state){
 		break;
 		}
 		case OPCODE_TCP_WRITE: {
-			fprintf(stderr, "decode: OPCODE_TCP_WRITE\n");
+			INFO("decode: OPCODE_TCP_WRITE\n");
                         struct connection *c;
 			c = (struct connection *) getConnectionFromRIpRPort();
+			
+			if(c == NULL){
+				// TODO Handle Failue in Jennic and Arduino
+				INFO("ERROR: COULD NOT WRITE, BECAUSE CONNECTION DOESNT EXIST ANYMORE\n");
+				break;
+			}
 
 			uint8_t i = 0;
 			for (i = 0; i < payloadLength; i++){
@@ -391,9 +447,15 @@ int8_t decodeSerialCommand(void *state){
 		break;
 		}
 		case OPCODE_TCP_AVAILABLE: {
-			fprintf(stderr, "decode: OPCODE_TCP_AVAILABLE\n");
+			INFO("decode: OPCODE_TCP_AVAILABLE\n");
                         struct connection *c;
 			c = (struct connection *) getConnectionFromRIpRPort();
+
+			if(c == NULL){
+				// TODO Handle Failue in Jennic and Arduino
+				INFO("ERROR: COULD NOT CHECK FOR AVAILABLE BYTES, BECAUSE CONNECTION DOESNT EXIST ANYMORE\n");
+				break;
+			}
 
 			uart0_writeb(OPCODE_TCP_AVAILABLE);
 			uart0_writeb(0x01);
@@ -405,42 +467,86 @@ int8_t decodeSerialCommand(void *state){
 		break;
 		}
 		case OPCODE_TCP_READ: {
-			fprintf(stderr, "decode: OPCODE_TCP_READ\n");
+			INFO("decode: OPCODE_TCP_READ\n");
                         struct connection *c;
 			c = (struct connection *) getConnectionFromRIpRPort();
 
+			if(c == NULL){
+				// TODO Handle Failue in Jennic and Arduino
+				INFO("ERROR: COULD NOT READ, BECAUSE CONNECTION DOESNT EXIST ANYMORE\n");
+				break;
+			}
 			
 			opCode = -1;
 			payloadLength = 255;
 			
 			if(s != NULL && memcmp(c,s, sizeof(struct connection)) == 0){
-				fprintf(stderr, "decode: OPCODE_TCP_READ from: HANDLE_INPUT\n");
+				INFO("decode: OPCODE_TCP_READ from: HANDLE_INPUT\n");
 				return 1;
 			}
 
 			
-			fprintf(stderr, "decode: OPCODE_TCP_READ from: SERIAL_APPCALL\n");
+			INFO("decode: OPCODE_TCP_READ from: SERIAL_APPCALL\n");
 		
-			fprintf(stderr, "TEST: %p\n", c);
+			INFO("TEST: %p\n", c);
 
 
 			uart0_writeb(OPCODE_TCP_READ);
-			fprintf(stderr, "uart opcode: %d\n", OPCODE_TCP_READ);
+			INFO("uart opcode: %d\n", OPCODE_TCP_READ);
 			uart0_writeb(c->tcpRx_Pointer);
-			fprintf(stderr, "uart length: %d\n", c->tcpRx_Pointer);
+			INFO("uart length: %d\n", c->tcpRx_Pointer);
 			uint8_t i = 0;
-			fprintf(stderr, "Data: ");
+			INFO("Data: ");
 			for ( i = 0; i < c->tcpRx_Pointer; i++){
-				fprintf(stderr, "%c_", c->tcpRx_Buffer[i]);
+				INFO("%c_", c->tcpRx_Buffer[i]);
 				uart0_writeb(c->tcpRx_Buffer[i]);
 			}
-			fprintf(stderr, "\n");
+			INFO("\n");
 			c->tcpRx_Pointer = 0;
 
 		break;
 		}
+		case OPCODE_TCP_PEEK: {
+			INFO("decode: OPCODE_TCP_PEEK\n");
+                        struct connection *c;
+			c = (struct connection *) getConnectionFromRIpRPort();
+
+			if(c == NULL){
+				// TODO Handle Failue in Jennic and Arduino
+				INFO("ERROR: COULD NOT PEEK BYTE, BECAUSE CONNECTION DOESNT EXIST ANYMORE\n");
+				break;
+			}
+			
+
+			uart0_writeb(OPCODE_TCP_PEEK);
+			INFO("uart opcode: %d\n", OPCODE_TCP_PEEK);
+			
+			// Payload Length
+			uart0_writeb(0x01);
+			
+			// write peeked byte
+			INFO("%c_", c->tcpRx_Buffer[0]);
+			uart0_writeb(c->tcpRx_Buffer[0]);
+		break;
+		}
+		case OPCODE_TCP_ALIVE: {
+			INFO("decode: OPCODE_TCP_ALIVE\n");
+                        struct connection *c;
+			c = (struct connection *) getConnectionFromRIpRPort();
+
+			uart0_writeb(OPCODE_TCP_ALIVE);
+			uart0_writeb(0x01);
+
+			if(c == NULL){
+				uart0_writeb(0x01);
+			}
+			else{
+				uart0_writeb(0x00);
+			}
+		break;
+		}
 		case OPCODE_TCP_SERVER_START: {
-			fprintf(stderr, "decode: OPCODE_TCP_SERVER_START");
+			INFO("decode: OPCODE_TCP_SERVER_START");
 		       	uint16_t port;
 		        port = ringbuf_get(&serialRx_Buffer) << 8;
 		        port = ringbuf_get(&serialRx_Buffer) | port;
@@ -452,16 +558,21 @@ int8_t decodeSerialCommand(void *state){
 		break;
 		}
 		case OPCODE_GET_TCP_SERVER_CONNECTIONS: {
-			fprintf(stderr, "decode: OPCODE_TCP_SERVER_CONNECTIONS");
+			INFO("decode: OPCODE_TCP_SERVER_CONNECTIONS");
 		       	uint16_t port;
 		        port = ringbuf_get(&serialRx_Buffer) << 8;
 			port = ringbuf_get(&serialRx_Buffer) | port;
 			
 			uart0_writeb(OPCODE_GET_TCP_SERVER_CONNECTIONS);
-			// TODO adapt payloadLength according to the Number of clients
-			uart0_writeb(0x12);
-
 			int8_t i = 0;
+			int8_t numClients = 0;
+			for(i = 0; i < MAX_CONNECTIONS; i++){
+				if ( connections[i].lport == port )  numClients++;
+			}
+			// write Payload Length
+			uart0_writeb(18 * numClients);
+
+			i = 0;
 			for(i = 0; i < MAX_CONNECTIONS; i++){
 				if ( connections[i].lport == port ) {
 					
@@ -473,6 +584,35 @@ int8_t decodeSerialCommand(void *state){
 					uart0_writeb((uint8_t) connections[i].rport);
 				}
 			}
+		break;
+		}
+		case OPCODE_TCP_SERVER_WRITE: {
+			// TODO
+			INFO("decode: OPCODE_TCP_SERVER_WRITE\n");
+			
+       			uint16_t port;
+        		port = ringbuf_get(&serialRx_Buffer) << 8;
+        		port = ringbuf_get(&serialRx_Buffer) | port;
+        		
+			uint8_t lastConnectionId = 255; // NOT overflow safe!
+			uint8_t i = 0;
+			for( i = 0; i < MAX_CONNECTIONS; i++){
+				if(connections[i].lport == port){
+					uint8_t o = 0;
+					for (o = 0; o < payloadLength; o++){
+						if(lastConnectionId == 255){
+							connections[i].tcpTx_Buffer[connections[i].tcpTx_Pointer++] = ringbuf_get(&serialRx_Buffer);
+						}
+						else{
+							connections[i].tcpTx_Buffer[connections[i].tcpTx_Pointer++] = connections[lastConnectionId].tcpTx_Buffer[connections[lastConnectionId].tcpTx_Pointer-payloadLength+o];
+
+						}
+					}
+					lastConnectionId = i;
+				}
+			}
+			uart0_writeb(OPCODE_TCP_WRITE);
+			uart0_writeb(0x00);
 		break;
 		}
 	}
@@ -505,16 +645,16 @@ struct connection *getConnectionFromRIpRPort(){
 }
 /*---------------------------------------------------------------------------*/
 void callArduino(struct connection *c){
-	fprintf(stderr, "callArduino() called\n");
+	INFO("callArduino() called\n");
 	// Send Message to Arduino that some Data arrived via TCP
 	uart0_writeb(OPCODE_CALLBACK);
 	uart0_writeb(0x12); // 0x12 == 0d18 // set site according to ip Version
 	for ( uint8_t i=0; i<sizeof(uip_ipaddr_t); i++) {
 		uint8_t b = c->ripaddr.u8[i];
 		uart0_writeb(b);
-		fprintf(stderr, "%x ", b);
+		INFO("%x ", b);
 	}
-	fprintf(stderr, "Callback for R-Port: %u\n", c->rport);
+	INFO("Callback for R-Port: %u\n", c->rport);
 	uint8_t port_msb = c->rport >> 8;
 	uint8_t port_lsb = c->rport;
 
