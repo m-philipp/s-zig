@@ -125,8 +125,9 @@ struct connection {
 
 	// Psock Read Buffer
 	uint8_t tcpRx_Buffer[TCP_RX_BUFFER_SIZE];
-	uint8_t tcpRx_Pointer;
-	
+	uint8_t tcpRx_endPointer;
+	uint8_t tcpRx_startPointer;
+
 	uint8_t tcpTx_Buffer[TCP_TX_BUFFER_SIZE];
 	uint8_t tcpTx_Pointer;
 	
@@ -162,25 +163,54 @@ PT_THREAD(handle_input(struct connection *c))
 	clock_time_t tcpReceiveStartTime = clock_time();
 	int8_t returnCode = 0;
 	do{
+		// PSOCK_READBUF breaks our thread if theres nothing
+		// more to read.
 		PSOCK_READBUF(p);
-		callArduino(c);
-		c->tcpRx_Pointer = PSOCK_DATALEN(p);
+		
+		// set Pointer according to data in rxBuffer
+		c->tcpRx_endPointer = PSOCK_DATALEN(p);
+		c->tcpRx_startPointer = 0;
 
+		// notify the Arduino
+		callArduino(c);
+
+		// if eveything read fits in out Rx Buffer continue, and
+		// out Arduino could fetch the Data later.
 		if(returnCode == 0 && uip_datalen() < TCP_RX_BUFFER_SIZE){
 			return;
 		}
 
-		
+		// give the Arduino some time to react on the callback
 		while(clock_time() - tcpReceiveStartTime < 200){
-			returnCode += serial_appcall(c);
+			// check if Arduino asked for "returnCode" bytes.
+			returnCode = serial_appcall(c);
+			// if so send Arduino the requested amount of bytes.
 			if(returnCode > 0){
 				uart0_writeb(OPCODE_TCP_READ);
-				uart0_writeb(c->tcpRx_Pointer);
-				for(uint8_t i = 0; i < c->tcpRx_Pointer; i++){
+				uart0_writeb(c->returnCode);
+				
+				// send the requested amount of bytes to the Arduino
+				for(uint8_t i = c->tcpRx_startPointer; i < c->tcpRx_startPointer + returnCode; i++){
 					uart0_writeb(c->tcpRx_Buffer[i]);
 				}
-				c->tcpRx_Pointer = 0;
-				break;
+				
+				// Adjust the start Pointer
+				c->tcpRx_startPointer += returnCode;
+
+				// check if everything is read, and we can
+				// continue in processing the incomming tcp
+				// data.
+				if(c->tcpRx_startPointer == tcpRx_endPointer){
+					c->tcpRx_endPointer = 0;
+					c->tcpRx_startPointer = 0;
+					
+					// break if Arduino has read everything
+					// from RX buffer and continue in
+					// processing incomming TCP Data.
+					returnCode = 0;
+					break;
+				}
+
 			}
 		}
 	} while(1);
@@ -304,7 +334,7 @@ void tcp_appcall(void *state){
 void clearConnection(struct connection *c){
 	c->state = STATE_FREE;
 	// TODO check
-	c->tcpRx_Pointer = 0;
+	c->tcpRx_endPointer = 0;
 	c->tcpTx_Pointer = 0;
 }
 /*---------------------------------------------------------------------------*/
@@ -460,27 +490,35 @@ int8_t decodeSerialCommand(void *state){
 			uart0_writeb(OPCODE_TCP_AVAILABLE);
 			uart0_writeb(0x01);
 			if(c->state == STATE_RECEIVING_TCP_DATA){
-				uart0_writeb(uip_len + c->tcpRx_Pointer);
+				uart0_writeb(uip_len + c->tcpRx_endPointer);
 			}else{
-				uart0_writeb(c->tcpRx_Pointer);
+				uart0_writeb(c->tcpRx_endPointer);
 			}
 		break;
 		}
 		case OPCODE_TCP_READ: {
+
+			// TODO
+			// Return only the requested amount of data to the Arduino.
+			// set the return Value to the requested amount.
+			// adjust c->tcpRx_startPointer
+
 			INFO("decode: OPCODE_TCP_READ\n");
                         struct connection *c;
 			c = (struct connection *) getConnectionFromRIpRPort();
 
 			if(c == NULL){
-				// TODO Handle Failue in Jennic and Arduino
+				// TODO Handle Failure in Jennic and Arduino
 				INFO("ERROR: COULD NOT READ, BECAUSE CONNECTION DOESNT EXIST ANYMORE\n");
 				break;
 			}
 			
-			opCode = -1;
-			payloadLength = 255;
-			
+			// if we are called because arduino responded to the 
+			// callback.
 			if(s != NULL && memcmp(c,s, sizeof(struct connection)) == 0){
+				opCode = -1;
+				payloadLength = 255;
+				
 				INFO("decode: OPCODE_TCP_READ from: HANDLE_INPUT\n");
 				return 1;
 			}
@@ -493,16 +531,16 @@ int8_t decodeSerialCommand(void *state){
 
 			uart0_writeb(OPCODE_TCP_READ);
 			INFO("uart opcode: %d\n", OPCODE_TCP_READ);
-			uart0_writeb(c->tcpRx_Pointer);
-			INFO("uart length: %d\n", c->tcpRx_Pointer);
+			uart0_writeb(c->tcpRx_endPointer);
+			INFO("uart length: %d\n", c->tcpRx_endPointer);
 			uint8_t i = 0;
 			INFO("Data: ");
-			for ( i = 0; i < c->tcpRx_Pointer; i++){
+			for ( i = 0; i < c->tcpRx_endPointer; i++){
 				INFO("%c_", c->tcpRx_Buffer[i]);
 				uart0_writeb(c->tcpRx_Buffer[i]);
 			}
 			INFO("\n");
-			c->tcpRx_Pointer = 0;
+			c->tcpRx_endPointer = 0;
 
 		break;
 		}
