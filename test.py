@@ -143,7 +143,7 @@ class TestSuite(unittest.TestCase):
 		
 		# Ask Jennic for TCP Data
 		print "Python: Ask if the Jennic has some TCP Data received"
-		self.p.stdin.write(struct.pack(">BB16sH", 16,18,ip,port))
+		self.p.stdin.write(struct.pack(">BB16sHB", 16,19,ip,port,7))
 		time.sleep(1)
 
 		# Read the TCP_data the Jennic revieced

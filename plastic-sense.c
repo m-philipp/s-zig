@@ -99,16 +99,20 @@
 #define TCP_RX_BUFFER_SIZE 128
 #define TCP_TX_BUFFER_SIZE 128
 
+#define SERIAL_RX_BUFFER_SIZE 128 // need size of power two!
 
 #define PACKET_TIMEOUT 60 * CLOCK_SECOND
 #define MAX_CONNECTIONS 16
 #define MAX_SERVER 4
 /*---------------------------------------------------------------------------*/
-uint8_t serialRx[128]; // need size of power two!
+uint8_t serialRx[SERIAL_RX_BUFFER_SIZE];
 struct ringbuf serialRx_Buffer;
 
-int8_t transmissionBuffer[128];
-uint8_t transmissionPointer = 0;
+uint8_t transmissionTx_Buffer[TCP_TX_BUFFER_SIZE];
+uint8_t transmissionTx_Pointer = 0;
+
+uint8_t transmissionRx_Buffer[TCP_RX_BUFFER_SIZE];
+uint8_t transmissionRx_Pointer = 0;
 
 
 
@@ -124,10 +128,15 @@ struct connection {
 	uint16_t lport;
 
 	// Psock Read Buffer
-	uint8_t tcpRx_Buffer[TCP_RX_BUFFER_SIZE];
-	uint8_t tcpRx_endPointer;
-	uint8_t tcpRx_startPointer;
+	//
+	// TODO remove aoutcommented code
+	//uint8_t tcpRx_Buffer[TCP_RX_BUFFER_SIZE];
+	//uint8_t tcpRx_endPointer;
+	//uint8_t tcpRx_startPointer;
 
+	uint8_t tcpRx_Buffer[TCP_RX_BUFFER_SIZE];
+	struct ringbuf tcpRx_ringBuffer;
+	
 	uint8_t tcpTx_Buffer[TCP_TX_BUFFER_SIZE];
 	uint8_t tcpTx_Pointer;
 	
@@ -153,65 +162,52 @@ struct arduinoServer arduinoServers[MAX_SERVER];
 static 
 PT_THREAD(handle_input(struct connection *c))
 {
+	INFO("handle_input\n");
 	struct psock *p = &c->ps_in;
 	
-	PSOCK_BEGIN(p);
-	
-	INFO("handle_input\n");
 
+	INFO("------------> TEST\n");
+	PSOCK_BEGIN(p);
+	INFO("------------> TEST\n");
 
 	clock_time_t tcpReceiveStartTime = clock_time();
-	int8_t returnCode = 0;
 	do{
-		// PSOCK_READBUF breaks our thread if theres nothing
+		// PSOCK_READBUF breaks our thread if there isn't
 		// more to read.
 		PSOCK_READBUF(p);
 		
-		// set Pointer according to data in rxBuffer
-		c->tcpRx_endPointer = PSOCK_DATALEN(p);
-		c->tcpRx_startPointer = 0;
+		transmissionRx_Pointer = PSOCK_DATALEN(p);
+		
+		// get enough space in rx buffer by removing the oldest entries.
+		while(TCP_RX_BUFFER_SIZE - ringbuf_elements(&c->tcpRx_ringBuffer) >= transmissionRx_Pointer){
+			ringbuf_get(&c->tcpRx_ringBuffer);
+		}
+
+		// fill rx buffer from transmission buffer
+		for(uint8_t i = 0; i  < transmissionRx_Pointer; i++){
+			ringbuf_put(&c->tcpRx_ringBuffer, transmissionRx_Buffer[i]);
+		}
+		transmissionRx_Pointer = 0;
 
 		// notify the Arduino
 		callArduino(c);
 
-		// if eveything read fits in out Rx Buffer continue, and
-		// out Arduino could fetch the Data later.
-		if(returnCode == 0 && uip_datalen() < TCP_RX_BUFFER_SIZE){
+		// if eveything read fits in our Rx Buffer continue,
+		// our Arduino could fetch the Data later.
+		// We dont need to halt the scheduler.
+		if(uip_datalen() < TCP_RX_BUFFER_SIZE){
 			return;
 		}
 
+		int8_t returnCode = 0;
 		// give the Arduino some time to react on the callback
 		while(clock_time() - tcpReceiveStartTime < 200){
 			// check if Arduino asked for "returnCode" bytes.
-			returnCode = serial_appcall(c);
-			// if so send Arduino the requested amount of bytes.
-			if(returnCode > 0){
-				uart0_writeb(OPCODE_TCP_READ);
-				uart0_writeb(c->returnCode);
-				
-				// send the requested amount of bytes to the Arduino
-				for(uint8_t i = c->tcpRx_startPointer; i < c->tcpRx_startPointer + returnCode; i++){
-					uart0_writeb(c->tcpRx_Buffer[i]);
-				}
-				
-				// Adjust the start Pointer
-				c->tcpRx_startPointer += returnCode;
-
-				// check if everything is read, and we can
-				// continue in processing the incomming tcp
-				// data.
-				if(c->tcpRx_startPointer == tcpRx_endPointer){
-					c->tcpRx_endPointer = 0;
-					c->tcpRx_startPointer = 0;
-					
-					// break if Arduino has read everything
-					// from RX buffer and continue in
-					// processing incomming TCP Data.
-					returnCode = 0;
-					break;
-				}
-
-			}
+			returnCode += serial_appcall(c);
+			
+			// wait until the Arduino has emptied the ringbuf
+			if(ringbuf_elements(&c->tcpRx_ringBuffer) == 0)
+				break;
 		}
 	} while(1);
 	
@@ -302,6 +298,8 @@ void tcp_appcall(void *state){
 				connections[i].ripaddr = uip_conn->ripaddr;
 				connections[i].lport = UIP_HTONS(uip_conn->lport);
 				connections[i].rport = UIP_HTONS(uip_conn->rport);
+				
+				ringbuf_init(&connections[i].tcpRx_ringBuffer, connections[i].tcpRx_Buffer, sizeof(connections[i].tcpRx_Buffer));
 
 				c = &connections[i];
 				break;
@@ -313,8 +311,12 @@ void tcp_appcall(void *state){
 			return;
 		}
 		tcp_markconn(uip_conn, c);
-		PSOCK_INIT(&c->ps_in, (uint8_t *)c->tcpRx_Buffer, sizeof(c->tcpRx_Buffer) - 1);
-		PSOCK_INIT(&c->ps_out, (uint8_t *)c->tcpRx_Buffer, sizeof(c->tcpRx_Buffer) - 1);
+		// TODO remove commented code
+		// PSOCK_INIT(&c->ps_in, (uint8_t *)c->tcpRx_Buffer, sizeof(c->tcpRx_Buffer) - 1);
+		// PSOCK_INIT(&c->ps_out, (uint8_t *)c->tcpRx_Buffer, sizeof(c->tcpRx_Buffer) - 1);
+		
+		PSOCK_INIT(&c->ps_in, (uint8_t *)transmissionRx_Buffer, sizeof(transmissionRx_Buffer) - 1);
+		PSOCK_INIT(&c->ps_out, (uint8_t *)transmissionRx_Buffer, sizeof(transmissionRx_Buffer) - 1);
 		
 		handle_connection(c);
 	} else if(c != NULL) {
@@ -333,9 +335,9 @@ void tcp_appcall(void *state){
 /*---------------------------------------------------------------------------*/
 void clearConnection(struct connection *c){
 	c->state = STATE_FREE;
-	// TODO check
-	c->tcpRx_endPointer = 0;
 	c->tcpTx_Pointer = 0;
+	c->rport = 0;
+	c->lport = 0;
 }
 /*---------------------------------------------------------------------------*/
 // Called if some Data arrived via UART or too much to buffer TCP Data is held in uip_buf
@@ -489,19 +491,10 @@ int8_t decodeSerialCommand(void *state){
 
 			uart0_writeb(OPCODE_TCP_AVAILABLE);
 			uart0_writeb(0x01);
-			if(c->state == STATE_RECEIVING_TCP_DATA){
-				uart0_writeb(uip_len + c->tcpRx_endPointer);
-			}else{
-				uart0_writeb(c->tcpRx_endPointer);
-			}
+			uart0_writeb(ringbuf_elements(&c->tcpRx_ringBuffer));
 		break;
 		}
 		case OPCODE_TCP_READ: {
-
-			// TODO
-			// Return only the requested amount of data to the Arduino.
-			// set the return Value to the requested amount.
-			// adjust c->tcpRx_startPointer
 
 			INFO("decode: OPCODE_TCP_READ\n");
                         struct connection *c;
@@ -513,34 +506,42 @@ int8_t decodeSerialCommand(void *state){
 				break;
 			}
 			
+			
+			uint8_t requestedAmountOfData = ringbuf_get(&serialRx_Buffer);
+
+			// send opcode
+			uart0_writeb(OPCODE_TCP_READ);
+			INFO("uart opcode: %d\n", OPCODE_TCP_READ);
+
+			if(requestedAmountOfData > ringbuf_elements(&c->tcpRx_ringBuffer))
+				requestedAmountOfData = ringbuf_elements(&c->tcpRx_ringBuffer);
+
+			// send payloadlength
+			uart0_writeb(requestedAmountOfData);
+			INFO("uart tcp_read is returning %d bytes.\n", requestedAmountOfData);
+
+
+			INFO("Data: ");
+			for (uint8_t i = 0; i < requestedAmountOfData; i++){
+				uint8_t t = ringbuf_get(&c->tcpRx_ringBuffer);
+				INFO("%c_", t);
+				uart0_writeb(t);
+			}
+			INFO("\n");
+
 			// if we are called because arduino responded to the 
-			// callback.
+			// callback. Return the amount of Data that was read.
 			if(s != NULL && memcmp(c,s, sizeof(struct connection)) == 0){
 				opCode = -1;
 				payloadLength = 255;
 				
-				INFO("decode: OPCODE_TCP_READ from: HANDLE_INPUT\n");
-				return 1;
+				INFO("decoded: OPCODE_TCP_READ war called from: HANDLE_INPUT\n");
+				return requestedAmountOfData;
 			}
 
 			
-			INFO("decode: OPCODE_TCP_READ from: SERIAL_APPCALL\n");
+			INFO("decoded: OPCODE_TCP_READ was called from: SERIAL_APPCALL\n");
 		
-			INFO("TEST: %p\n", c);
-
-
-			uart0_writeb(OPCODE_TCP_READ);
-			INFO("uart opcode: %d\n", OPCODE_TCP_READ);
-			uart0_writeb(c->tcpRx_endPointer);
-			INFO("uart length: %d\n", c->tcpRx_endPointer);
-			uint8_t i = 0;
-			INFO("Data: ");
-			for ( i = 0; i < c->tcpRx_endPointer; i++){
-				INFO("%c_", c->tcpRx_Buffer[i]);
-				uart0_writeb(c->tcpRx_Buffer[i]);
-			}
-			INFO("\n");
-			c->tcpRx_endPointer = 0;
 
 		break;
 		}
@@ -563,6 +564,7 @@ int8_t decodeSerialCommand(void *state){
 			uart0_writeb(0x01);
 			
 			// write peeked byte
+			// TODO fix!
 			INFO("%c_", c->tcpRx_Buffer[0]);
 			uart0_writeb(c->tcpRx_Buffer[0]);
 		break;
@@ -584,7 +586,7 @@ int8_t decodeSerialCommand(void *state){
 		break;
 		}
 		case OPCODE_TCP_SERVER_START: {
-			INFO("decode: OPCODE_TCP_SERVER_START");
+			INFO("decode: OPCODE_TCP_SERVER_START\n");
 		       	uint16_t port;
 		        port = ringbuf_get(&serialRx_Buffer) << 8;
 		        port = ringbuf_get(&serialRx_Buffer) | port;
@@ -676,7 +678,7 @@ struct connection *getConnectionFromRIpRPort(){
         struct connection *c = NULL;
         for( i = 0; i < MAX_CONNECTIONS; i++){
 		if(memcmp(connections[i].ripaddr.u8, ip, sizeof(ip)) == 0 && connections[i].rport == port){ // TODO memcmp manpage nachsehen
-						c = &connections[i];
+			c = &connections[i];
 		}
 	}
 	return c;
