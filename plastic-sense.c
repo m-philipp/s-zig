@@ -127,13 +127,6 @@ struct connection {
 	uint16_t rport;
 	uint16_t lport;
 
-	// Psock Read Buffer
-	//
-	// TODO remove aoutcommented code
-	//uint8_t tcpRx_Buffer[TCP_RX_BUFFER_SIZE];
-	//uint8_t tcpRx_endPointer;
-	//uint8_t tcpRx_startPointer;
-
 	uint8_t tcpRx_Buffer[TCP_RX_BUFFER_SIZE];
 	struct ringbuf tcpRx_ringBuffer;
 	
@@ -166,9 +159,7 @@ PT_THREAD(handle_input(struct connection *c))
 	struct psock *p = &c->ps_in;
 	
 
-	INFO("------------> TEST\n");
 	PSOCK_BEGIN(p);
-	INFO("------------> TEST\n");
 
 	clock_time_t tcpReceiveStartTime = clock_time();
 	do{
@@ -179,7 +170,7 @@ PT_THREAD(handle_input(struct connection *c))
 		transmissionRx_Pointer = PSOCK_DATALEN(p);
 		
 		// get enough space in rx buffer by removing the oldest entries.
-		while(TCP_RX_BUFFER_SIZE - ringbuf_elements(&c->tcpRx_ringBuffer) >= transmissionRx_Pointer){
+		while((TCP_RX_BUFFER_SIZE - ringbuf_elements(&c->tcpRx_ringBuffer)) <= transmissionRx_Pointer){
 			ringbuf_get(&c->tcpRx_ringBuffer);
 		}
 
@@ -311,9 +302,6 @@ void tcp_appcall(void *state){
 			return;
 		}
 		tcp_markconn(uip_conn, c);
-		// TODO remove commented code
-		// PSOCK_INIT(&c->ps_in, (uint8_t *)c->tcpRx_Buffer, sizeof(c->tcpRx_Buffer) - 1);
-		// PSOCK_INIT(&c->ps_out, (uint8_t *)c->tcpRx_Buffer, sizeof(c->tcpRx_Buffer) - 1);
 		
 		PSOCK_INIT(&c->ps_in, (uint8_t *)transmissionRx_Buffer, sizeof(transmissionRx_Buffer) - 1);
 		PSOCK_INIT(&c->ps_out, (uint8_t *)transmissionRx_Buffer, sizeof(transmissionRx_Buffer) - 1);
@@ -563,10 +551,14 @@ int8_t decodeSerialCommand(void *state){
 			// Payload Length
 			uart0_writeb(0x01);
 			
-			// write peeked byte
-			// TODO fix!
-			INFO("%c_", c->tcpRx_Buffer[0]);
-			uart0_writeb(c->tcpRx_Buffer[0]);
+			// write peeked byte (if there is no byte to peek we returne 0)
+			uint8_t x = 0;
+			struct ringbuf *r = &c->tcpRx_ringBuffer;
+			if(((r->put_ptr - r->get_ptr) & r->mask) > 0){
+				x = r->data[r->get_ptr];
+			}
+			uart0_writeb(x);
+			INFO("peeked byte: %c_", x);
 		break;
 		}
 		case OPCODE_TCP_ALIVE: {
