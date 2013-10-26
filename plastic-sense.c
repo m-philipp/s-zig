@@ -170,7 +170,7 @@ PT_THREAD(handle_input(struct connection *c))
 		transmissionRx_Pointer = PSOCK_DATALEN(p);
 		
 		// get enough space in rx buffer by removing the oldest entries.
-		while((TCP_RX_BUFFER_SIZE - ringbuf_elements(&c->tcpRx_ringBuffer)) <= transmissionRx_Pointer){
+		while((TCP_RX_BUFFER_SIZE - ringbuf_elements(&c->tcpRx_ringBuffer)) < transmissionRx_Pointer){
 			ringbuf_get(&c->tcpRx_ringBuffer);
 		}
 
@@ -190,11 +190,10 @@ PT_THREAD(handle_input(struct connection *c))
 			return;
 		}
 
-		int8_t returnCode = 0;
 		// give the Arduino some time to react on the callback
 		while(clock_time() - tcpReceiveStartTime < 200){
 			// check if Arduino asked for "returnCode" bytes.
-			returnCode += serial_appcall(c);
+			serial_appcall(c);
 			
 			// wait until the Arduino has emptied the ringbuf
 			if(ringbuf_elements(&c->tcpRx_ringBuffer) == 0)
@@ -329,7 +328,7 @@ void clearConnection(struct connection *c){
 }
 /*---------------------------------------------------------------------------*/
 // Called if some Data arrived via UART or too much to buffer TCP Data is held in uip_buf
-int8_t serial_appcall(void *state){
+void serial_appcall(void *state){
 	// timeout
 
 
@@ -349,18 +348,17 @@ int8_t serial_appcall(void *state){
 
 	if(ringbuf_elements(&serialRx_Buffer) == payloadLength && payloadLength < 255){
 		INFO("call: decodeSerialCommand() \n");
-		return decodeSerialCommand(state);
+		decodeSerialCommand(state);
 	}
 
 
-	return -1;
 
 }
 
 
 /*---------------------------------------------------------------------------*/
 
-int8_t decodeSerialCommand(void *state){
+void decodeSerialCommand(void *state){
 	struct connection *s = (struct connection *)state;
 	switch(opCode) {
 		case OPCODE_SET_MAC: {
@@ -516,19 +514,6 @@ int8_t decodeSerialCommand(void *state){
 				uart0_writeb(t);
 			}
 			INFO("\n");
-
-			// if we are called because arduino responded to the 
-			// callback. Return the amount of Data that was read.
-			if(s != NULL && memcmp(c,s, sizeof(struct connection)) == 0){
-				opCode = -1;
-				payloadLength = 255;
-				
-				INFO("decoded: OPCODE_TCP_READ war called from: HANDLE_INPUT\n");
-				return requestedAmountOfData;
-			}
-
-			
-			INFO("decoded: OPCODE_TCP_READ was called from: SERIAL_APPCALL\n");
 		
 
 		break;
@@ -651,7 +636,6 @@ int8_t decodeSerialCommand(void *state){
 
 	opCode = -1;
 	payloadLength = 255;
-	return 0;
 }
 
 
