@@ -138,11 +138,11 @@ struct connection {
 
 // FunDefs
 struct connection *getConnectionFromRIpRPort(); // TODO check
-int8_t decodeSerialCommand(void *state);
+void decodeSerialCommand(void *state);
 void callback(uint8_t d);
 void clearConnection(struct connection *c);
 void tcp_appcall(void *state);
-int8_t serial_appcall(void *state);
+void serial_appcall(void *state);
 void callArduino(struct connection *c);
 
 // Serial RPC Vars
@@ -359,7 +359,6 @@ void serial_appcall(void *state){
 /*---------------------------------------------------------------------------*/
 
 void decodeSerialCommand(void *state){
-	struct connection *s = (struct connection *)state;
 	switch(opCode) {
 		case OPCODE_SET_MAC: {
 			INFO("decode: OPCODE_SET_MAC\n");
