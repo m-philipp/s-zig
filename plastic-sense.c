@@ -82,7 +82,7 @@
 #define OPCODE_TCP_SERVER_WRITE 21
 
 
-#define OPCODE_CALLBACK 22
+#define OPCODE_CALLBACK 42
 
 //#define INTERVAL (CLOCK_SECOND/2)
 #define SERVER_NOT_CONNECTED 0
@@ -161,7 +161,6 @@ PT_THREAD(handle_input(struct connection *c))
 
 	PSOCK_BEGIN(p);
 
-	clock_time_t tcpReceiveStartTime = clock_time();
 	do{
 		// PSOCK_READBUF breaks our thread if there isn't
 		// more to read.
@@ -189,9 +188,11 @@ PT_THREAD(handle_input(struct connection *c))
 		if(uip_datalen() < TCP_RX_BUFFER_SIZE){
 			return;
 		}
+		
+		clock_time_t tcpReceiveStartTime = clock_time();
 
 		// give the Arduino some time to react on the callback
-		while(clock_time() - tcpReceiveStartTime < 200){
+		while(clock_time() - tcpReceiveStartTime < 500){
 			// check if Arduino asked for "returnCode" bytes.
 			serial_appcall(c);
 			
@@ -215,6 +216,9 @@ PT_THREAD(handle_output(struct connection *c))
 	
 	while(1){
 		PSOCK_WAIT_UNTIL(p, c->tcpTx_Pointer > 0)
+		
+		INFO("tcp_txPointer: %d\n",c->tcpTx_Pointer);
+		
 		PSOCK_SEND(p, c->tcpTx_Buffer, c->tcpTx_Pointer);
 		c->tcpTx_Pointer = 0;
 	}
@@ -332,7 +336,7 @@ void serial_appcall(void *state){
 	// timeout
 
 
-	INFO("called: serial_appcall() \n");
+	//INFO("called: serial_appcall() \n");
 		
 	if(ringbuf_elements(&serialRx_Buffer) > 0 && opCode == -1){
 		opCode = ringbuf_get(&serialRx_Buffer);
@@ -343,7 +347,7 @@ void serial_appcall(void *state){
 		INFO("set payloadLength to: %d \n", payloadLength);
 	}
 	
-	INFO("elements in ringbuf: %d \n", ringbuf_elements(&serialRx_Buffer));
+	//INFO("elements in ringbuf: %d \n", ringbuf_elements(&serialRx_Buffer));
 
 
 	if(ringbuf_elements(&serialRx_Buffer) == payloadLength && payloadLength < 255){
@@ -456,7 +460,7 @@ void decodeSerialCommand(void *state){
 			}
 
 			uint8_t i = 0;
-			for (i = 0; i < payloadLength; i++){
+			for (i = 0; i < (payloadLength - 18); i++){
 				c->tcpTx_Buffer[c->tcpTx_Pointer++] = ringbuf_get(&serialRx_Buffer);
 			}
 			uart0_writeb(OPCODE_TCP_WRITE);
