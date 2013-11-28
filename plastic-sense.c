@@ -367,6 +367,9 @@ void decodeSerialCommand(void *state){
 		case OPCODE_SET_MAC: {
 			INFO("decode: OPCODE_SET_MAC\n");
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_SET_IP: {
@@ -375,46 +378,79 @@ void decodeSerialCommand(void *state){
 			// uip_ipaddr_t addr;
 			// uip_ipaddr(&addr, 192,168,1,2);
 			// uip_sethostaddr(&addr);
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_SET_DNS: {
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_SET_SUBNET: {
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_SET_GATEWAY: {
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_SET_DHCP_ON: {
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_RENEW_DHCP_LEASE: {
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_GET_IP: {
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_GET_DNS: {
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_GET_SUBNET: {
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_GET_GATEWAY: {
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_CONNECT_TO_HOST: {
 			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
 		break;
 		}
 		case OPCODE_CONNECT_TO_IP: {
