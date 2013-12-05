@@ -28,14 +28,14 @@ class TestSuite(unittest.TestCase):
 		return returnValue
 
 	def setUp(self):
-		self.p=subprocess.Popen(['./plastic-sense.minimal-net'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+		self.p=subprocess.Popen(['./../plastic-sense.minimal-net'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 		while "*******Contiki 2.5 online*******" not in self.p.stdout.readline():
 			pass
 
 
 	# Test Case:
 	# connect to Server send and recieve some Data
-	def dont_test_connectToServer(self):
+	def test_connectToServer(self):
 		#create an INET, STREAMing socket
 		serverSocket = socket(AF_INET6, SOCK_STREAM)
 		serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
@@ -75,9 +75,16 @@ class TestSuite(unittest.TestCase):
 			time.sleep(3)
 			
 			# let the Jennic send some btes via tcp
-			payload = "blaaa"
+                        payloadLength = 18
+			payload = ""
+                        for i in range(10):
+            			payload += "0123456789"
+                                payloadLength += 10
+                        print "Python: sending: " + payload
 			print "Python: send Jennic some bytes to transmit."
-			self.p.stdin.write(struct.pack(">BB16BH5s", 14,23,ip[0],ip[1],ip[2],ip[3],ip[4],ip[5],ip[6],ip[7],ip[8],ip[9],ip[10],ip[11],ip[12],ip[13],ip[14],ip[15],port,payload))
+			self.p.stdin.write(struct.pack(">BB16BH"+str(payloadLength - 18)+"s", 14,payloadLength,ip[0],ip[1],ip[2],ip[3],ip[4],ip[5],ip[6],ip[7],ip[8],ip[9],ip[10],ip[11],ip[12],ip[13],ip[14],ip[15],port,payload))
+
+
 			time.sleep(1)
 			opcode,length=struct.unpack(">BB", self.p.stdout.read(2))
 			print "Python: opcode: ", opcode, " length: ", length
@@ -86,6 +93,8 @@ class TestSuite(unittest.TestCase):
 			print "Python: socket recieved: " , recievedPayload
 			self.assertTrue(True)
 		
+
+
 		t = Thread(target=foo, args=(clientSocket, clientAddress,ip,self))
 		t.start()
 		print "Python: Setup Python Server on Port 8000"
@@ -95,7 +104,7 @@ class TestSuite(unittest.TestCase):
 		self.p.stdin.write(struct.pack(">BB16BH", 13,18,ip[0],ip[1],ip[2],ip[3],ip[4],ip[5],ip[6],ip[7],ip[8],ip[9],ip[10],ip[11],ip[12],ip[13],ip[14],ip[15],port))
 		print "Python: send Jennic opcode to connect to Server"
 
-		# Join the listenin Thread back in the main thread
+		# Join the listening Thread back in the main thread
 		# t.join()
 
 
@@ -107,62 +116,6 @@ class TestSuite(unittest.TestCase):
 		while True:
 			time.sleep(2)
 
-
-	# Test Case:
-	# Start Server, Recieve some TCP Data, Send some TCP Data
-	def test_startServer(self):
-		# start TCP_Server on Port 8000
-		self.p.stdin.write(struct.pack(">BBH", 19,2,8000))
-		self.assertTrue(struct.unpack(">BB", self.p.stdout.read(2)) == (19, 0))
-		
-		time.sleep(2)
-
-		# Connect to Jennic on Jennic Port 8000
-		# local PC-Addr: fe80::98ba:4fff:fe62:342a/64 (from ifconfig)
-		print "Python: Connect to Jennic on Port 8000"
-		addrinfo = getaddrinfo('fe80::206:98ff:fe00:232%tap0', 8000, AF_INET6, SOCK_STREAM)
-		(family, socktype, proto, canonname, sockaddr) = addrinfo[0]
-		s = socket(family, socktype, proto)
-		s.settimeout(0.1)
-		s.connect(sockaddr)
-		
-		# Send some bytes to Jennic
-		print "Python: Send some bytes via Telnet"
-		s.send("blaaaaa")
-		time.sleep(2)
-
-		# Read Callback from Jennic
-		print "Python: Read Callback from Jennic"
-		opcode,length,ip,port=struct.unpack(">BB16sH", self.p.stdout.read(20))
-		print "Python: opcode: " , hex(opcode)
-		print "Python: length: " , hex(length)
-		# print ip addr
-		print "Python: Callback IP:"
-		print "".join([hex(ord(x))[2:] for x in ip])
-		print "Python: Callback Port:", port	
-		
-		# Ask Jennic for TCP Data
-		print "Python: Ask if the Jennic has some TCP Data received"
-		self.p.stdin.write(struct.pack(">BB16sHB", 16,19,ip,port,7))
-		time.sleep(1)
-
-		# Read the TCP_data the Jennic revieced
-		print "Python: Read the TCP Data the Jennic received"
-		opcode,length=struct.unpack(">BB", self.p.stdout.read(2))
-		print "Python: opcode: " , hex(opcode)
-		print "Python: length: " , hex(length)
-		payload = struct.unpack(">7s", self.p.stdout.read(7))
-		print "Python: payload: " , payload
-		#while True:
-		#	time.sleep(0.01)
-
-		# let the Jennic send some bytes back via tcp
-		self.p.stdin.write(struct.pack(">BB16sH7s", 14,25,ip,port,payload[0]))
-		print "Python: Send Opcode to Send Data"
-		time.sleep(1)
-		recievedPayload = s.recv(128)
-		print "Python: socket recieved: " , recievedPayload
-		self.assertTrue(True)
 	
 	def tearDown(self):
 		self.p.kill()

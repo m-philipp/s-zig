@@ -703,6 +703,10 @@ void callArduino(struct connection *c){
 	INFO("callArduino() called\n");
 	// Send Message to Arduino that some Data arrived via TCP
 	uart0_writeb(OPCODE_CALLBACK);
+	return;
+
+	// there is currently not responded which connection caused the callback,
+	// due to keep the Arduino Interrupts short.
 	uart0_writeb(0x12); // 0x12 == 0d18 // set site according to ip Version
 	for ( uint8_t i=0; i<sizeof(uip_ipaddr_t); i++) {
 		uint8_t b = c->ripaddr.u8[i];
