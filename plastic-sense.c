@@ -49,7 +49,7 @@
 #include <stdbool.h>
 
 
-#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
 #define INFO(...) fprintf(stderr, __VA_ARGS__)
@@ -81,6 +81,8 @@
 #define OPCODE_GET_TCP_SERVER_CONNECTIONS 20
 #define OPCODE_TCP_SERVER_WRITE 21
 
+#define OPCODE_CONNECTION_TEARDOWN 22
+#define OPCODE_CLOSE_SERVER_PORT 23
 
 #define OPCODE_CALLBACK 42
 
@@ -139,7 +141,7 @@ struct connection {
 // FunDefs
 struct connection *getConnectionFromRIpRPort(); // TODO check
 void decodeSerialCommand(void *state);
-void callback(uint8_t d);
+int callback(uint8_t d);
 void clearConnection(struct connection *c);
 void tcp_appcall(void *state);
 void serial_appcall(void *state);
@@ -186,7 +188,8 @@ PT_THREAD(handle_input(struct connection *c))
 		// our Arduino could fetch the Data later.
 		// We dont need to halt the scheduler.
 		if(uip_datalen() < TCP_RX_BUFFER_SIZE){
-			return;
+			PSOCK_EXIT(p);
+			//return;
 		}
 		
 		clock_time_t tcpReceiveStartTime = clock_time();
@@ -266,9 +269,11 @@ PROCESS_THREAD(plastic_sense_process, ev, data)
 }
 /*---------------------------------------------------------------------------*/
 // Handle input on the serial line.
-void callback(uint8_t d){
+int callback(uint8_t d){
          ringbuf_put(&serialRx_Buffer, d);
          process_poll(&plastic_sense_process);
+	 leds_toggle(LEDS_ALL);
+	 return 1;
 }
 /*---------------------------------------------------------------------------*/
 void tcp_appcall(void *state){
@@ -334,28 +339,35 @@ void clearConnection(struct connection *c){
 // Called if some Data arrived via UART or too much to buffer TCP Data is held in uip_buf
 void serial_appcall(void *state){
 	// timeout
-
-
-	//INFO("called: serial_appcall() \n");
-		
-	if(ringbuf_elements(&serialRx_Buffer) > 0 && opCode == -1){
-		opCode = ringbuf_get(&serialRx_Buffer);
-		INFO("set opCode to: %d \n", opCode);
-	}
-	if(ringbuf_elements(&serialRx_Buffer) > 0 && opCode > -1 && payloadLength == 255){
-		payloadLength = ringbuf_get(&serialRx_Buffer);
-		INFO("set payloadLength to: %d \n", payloadLength);
-	}
 	
-	//INFO("elements in ringbuf: %d \n", ringbuf_elements(&serialRx_Buffer));
+	// Test-Reply Code
+	//while(ringbuf_elements(&serialRx_Buffer) > 0){
+	//	uart0_writeb(ringbuf_get(&serialRx_Buffer));
+	//}
+	//return;
 
+	while(ringbuf_elements(&serialRx_Buffer) > 0){
 
-	if(ringbuf_elements(&serialRx_Buffer) == payloadLength && payloadLength < 255){
-		INFO("call: decodeSerialCommand() \n");
-		decodeSerialCommand(state);
+		INFO("called: serial_appcall() \n");
+		
+		if(opCode == -1){
+			opCode = ringbuf_get(&serialRx_Buffer);
+			INFO("set opCode to: %d \n", opCode);
+		}
+		if(ringbuf_elements(&serialRx_Buffer) && opCode > -1 && payloadLength == 255){
+			payloadLength = ringbuf_get(&serialRx_Buffer);
+			INFO("set payloadLength to: %d \n", payloadLength);
+		}
+		
+		//INFO("elements in ringbuf: %d \n", ringbuf_elements(&serialRx_Buffer));
+	
+	
+		if(ringbuf_elements(&serialRx_Buffer) == payloadLength && payloadLength < 255){
+			INFO("call: decodeSerialCommand() \n");
+			decodeSerialCommand(state);
+		}
+
 	}
-
-
 
 }
 
@@ -370,6 +382,8 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_SET_MAC);
+			uart0_writeb(0x00);
 		break;
 		}
 		case OPCODE_SET_IP: {
@@ -381,6 +395,8 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_SET_IP);
+			uart0_writeb(0x00);
 		break;
 		}
 		case OPCODE_SET_DNS: {
@@ -388,6 +404,8 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_SET_DNS);
+			uart0_writeb(0x00);
 		break;
 		}
 		case OPCODE_SET_SUBNET: {
@@ -395,6 +413,8 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_SET_SUBNET);
+			uart0_writeb(0x00);
 		break;
 		}
 		case OPCODE_SET_GATEWAY: {
@@ -402,6 +422,8 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_SET_GATEWAY);
+			uart0_writeb(0x00);
 		break;
 		}
 		case OPCODE_SET_DHCP_ON: {
@@ -409,6 +431,9 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_SET_DHCP_ON);
+			uart0_writeb(0x01);
+			uart0_writeb(0x01);
 		break;
 		}
 		case OPCODE_RENEW_DHCP_LEASE: {
@@ -416,6 +441,9 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_RENEW_DHCP_LEASE);
+			uart0_writeb(0x01);
+			uart0_writeb(0x01);
 		break;
 		}
 		case OPCODE_GET_IP: {
@@ -423,6 +451,10 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_GET_IP);
+			uart0_writeb(0x10); // dec = 16
+			for(uint8_t i = 0; i < 16; i++);
+				uart0_writeb(0x00);
 		break;
 		}
 		case OPCODE_GET_DNS: {
@@ -430,6 +462,10 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_GET_DNS);
+			uart0_writeb(0x10); // dec = 16
+			for(uint8_t i = 0; i < 16; i++);
+				uart0_writeb(0x00);
 		break;
 		}
 		case OPCODE_GET_SUBNET: {
@@ -437,6 +473,10 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_GET_SUBNET);
+			uart0_writeb(0x10);
+			for(uint8_t i = 0; i < 16; i++);
+				uart0_writeb(0x00);
 		break;
 		}
 		case OPCODE_GET_GATEWAY: {
@@ -444,6 +484,10 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_GET_GATEWAY);
+			uart0_writeb(0x10);
+			for(uint8_t i = 0; i < 16; i++);
+				uart0_writeb(0x00);
 		break;
 		}
 		case OPCODE_CONNECT_TO_HOST: {
@@ -451,6 +495,11 @@ void decodeSerialCommand(void *state){
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			uart0_writeb(OPCODE_CONNECT_TO_HOST);
+			uart0_writeb(0x11);
+			for(uint8_t i = 0; i < 16; i++);
+				uart0_writeb(0x00);
+			uart0_writeb(0x01);
 		break;
 		}
 		case OPCODE_CONNECT_TO_IP: {
@@ -511,6 +560,9 @@ void decodeSerialCommand(void *state){
 			if(c == NULL){
 				// TODO Handle Failue in Jennic and Arduino
 				INFO("ERROR: COULD NOT CHECK FOR AVAILABLE BYTES, BECAUSE CONNECTION DOESNT EXIST ANYMORE\n");
+				uart0_writeb(OPCODE_TCP_AVAILABLE);
+				uart0_writeb(0x01);
+				uart0_writeb((int8_t) -1);
 				break;
 			}
 
@@ -643,7 +695,6 @@ void decodeSerialCommand(void *state){
 		break;
 		}
 		case OPCODE_TCP_SERVER_WRITE: {
-			// TODO
 			INFO("decode: OPCODE_TCP_SERVER_WRITE\n");
 			
        			uint16_t port;
@@ -671,8 +722,28 @@ void decodeSerialCommand(void *state){
 			uart0_writeb(0x00);
 		break;
 		}
+		case OPCODE_CONNECTION_TEARDOWN: {
+			INFO("decode: OPCODE_CONNECTION_TEARDOWN\n");
+			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
+			uart0_writeb(OPCODE_CONNECTION_TEARDOWN);
+			uart0_writeb(0x00);
+		break;
+		}
+		case OPCODE_CLOSE_SERVER_PORT: {
+			INFO("decode: OPCODE_CLOSE_SERVER_PORT\n");
+			// TODO
+			for(uint8_t i = 0; i < payloadLength; i++){
+				ringbuf_get(&serialRx_Buffer);
+			}
+			uart0_writeb(OPCODE_CLOSE_SERVER_PORT);
+			uart0_writeb(0x00);
+		break;
+		}
 	}
-
+	// TODO handle default!
 	opCode = -1;
 	payloadLength = 255;
 }
