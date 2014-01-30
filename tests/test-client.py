@@ -28,7 +28,7 @@ class TestSuite(unittest.TestCase):
 		return returnValue
 
 	def setUp(self):
-		self.p=subprocess.Popen(['./../plastic-sense.minimal-net'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+		self.p=subprocess.Popen(['./plastic-sense.minimal-net'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 		while "*******Contiki 2.5 online*******" not in self.p.stdout.readline():
 			pass
 
@@ -107,8 +107,10 @@ class TestSuite(unittest.TestCase):
 		# Join the listening Thread back in the main thread
 		# t.join()
 
-
-		self.assertTrue(struct.unpack(">BBB", self.p.stdout.read(3)) == (13, 1, 1))
+                
+	        returnValue = struct.unpack(">BBB", self.p.stdout.read(3))
+                print "Python: Jennic returned: " + str(returnValue);
+		self.assertTrue(returnValue == (13, 1, 1))
 		print "Python: got connection established from Jennic"
 		
 		

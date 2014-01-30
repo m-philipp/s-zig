@@ -49,7 +49,7 @@
 #include <stdbool.h>
 
 
-// #define DEBUG
+//#define DEBUG
 
 #ifdef DEBUG
 #define INFO(...) fprintf(stderr, __VA_ARGS__)
@@ -106,6 +106,8 @@
 #define PACKET_TIMEOUT 60 * CLOCK_SECOND
 #define MAX_CONNECTIONS 16
 #define MAX_SERVER 4
+
+#define MAX_CONNECTION_SETUP_TIME 10000 // seconds
 /*---------------------------------------------------------------------------*/
 uint8_t serialRx[SERIAL_RX_BUFFER_SIZE];
 struct ringbuf serialRx_Buffer;
@@ -150,6 +152,9 @@ void callArduino(struct connection *c);
 // Serial RPC Vars
 static uint8_t payloadLength = 255;
 static int8_t opCode = -1;
+
+// Connect Timeout (255 = no connect processing)
+static clock_time_t connectSetupTime = 255;
 
 struct connection connections[MAX_CONNECTIONS];                                     
 struct arduinoServer arduinoServers[MAX_SERVER];    
@@ -251,11 +256,25 @@ PROCESS_THREAD(plastic_sense_process, ev, data)
 	
   	ringbuf_init(&serialRx_Buffer, serialRx, sizeof(serialRx));
 	uart0_set_input(callback);
-	
+
+	for(uint8_t i = 0; i < MAX_CONNECTIONS; i++)
+		clearConnection(&connections[i]);
+
+	connectSetupTime = 0;
 
 	while(1) {
 		PROCESS_WAIT_EVENT();
 		INFO("RUN Plastic Sense Process\n");
+
+		// Maintain connection setup timeout
+		if(connectSetupTime != 0 && ((unsigned long) clock_time() - connectSetupTime) > MAX_CONNECTION_SETUP_TIME){
+			INFO("sending connect to IP was NOT successfull\n");
+			connectSetupTime = 0;
+			uart0_writeb(OPCODE_CONNECT_TO_IP); // TODO resolve if OPCODE_CONNECT_TO_HOST was called
+			uart0_writeb(0x01);
+			uart0_writeb(0x00);
+		}
+
 		if(ev == tcpip_event){
 			tcp_appcall(data);
 		}
@@ -294,13 +313,21 @@ void tcp_appcall(void *state){
 		for(i = 0; i < MAX_CONNECTIONS; i++) {
 			if(connections[i].state == STATE_FREE){
 				connections[i].state = STATE_IDLE;
-				connections[i].ripaddr = uip_conn->ripaddr;
+				//connections[i].ripaddr = uip_conn->ripaddr;
+				memcpy(connections[i].ripaddr.u8, uip_conn->ripaddr.u8, sizeof(uip_ipaddr_t));
 				connections[i].lport = UIP_HTONS(uip_conn->lport);
 				connections[i].rport = UIP_HTONS(uip_conn->rport);
 				
 				ringbuf_init(&connections[i].tcpRx_ringBuffer, connections[i].tcpRx_Buffer, sizeof(connections[i].tcpRx_Buffer));
 
 				c = &connections[i];
+
+				if(connectSetupTime > 0 && ((unsigned long) connectSetupTime - clock_time() > MAX_CONNECTION_SETUP_TIME)){
+					uart0_writeb(OPCODE_CONNECT_TO_IP); // TODO check if OPCODE_CONNECT_TO_HOST was called
+					uart0_writeb(0x01);
+					uart0_writeb(0x01);
+				}
+
 				break;
 			}
 		}
@@ -350,6 +377,7 @@ void serial_appcall(void *state){
 
 		INFO("called: serial_appcall() \n");
 		
+
 		if(opCode == -1){
 			opCode = ringbuf_get(&serialRx_Buffer);
 			INFO("set opCode to: %d \n", opCode);
@@ -520,17 +548,14 @@ void decodeSerialCommand(void *state){
 			port = ringbuf_get(&serialRx_Buffer) | port;
 			INFO("Port: %d\n", port);
 			
-			uart0_writeb(OPCODE_CONNECT_TO_IP);
-			uart0_writeb(0x01);
 			
 			uip_ipaddr_t ipaddr;
 			uip_ip6addr(&ipaddr, ip[0],ip[1],ip[2],ip[3],ip[4],ip[5],ip[6],ip[7]);
 
-			if(tcp_connect(&ipaddr, UIP_HTONS(port), NULL) !=  NULL){
-				uart0_writeb(0x01); 
-			} else{
-				uart0_writeb(0x00);
-			}
+			tcp_connect(&ipaddr, UIP_HTONS(port), NULL);
+
+			connectSetupTime = clock_time();
+		
 		break;
 		}
 		case OPCODE_TCP_WRITE: {
@@ -541,6 +566,8 @@ void decodeSerialCommand(void *state){
 			if(c == NULL){
 				// TODO Handle Failue in Jennic and Arduino
 				INFO("ERROR: COULD NOT WRITE, BECAUSE CONNECTION DOESNT EXIST ANYMORE\n");
+				//uart0_writeb(OPCODE_TCP_WRITE);
+				//uart0_writeb(0x00);
 				break;
 			}
 
@@ -751,7 +778,7 @@ void decodeSerialCommand(void *state){
 
 /*---------------------------------------------------------------------------*/
 struct connection *getConnectionFromRIpRPort(){
-	uint8_t ip[sizeof(uip_ipaddr_t)];
+	static uint8_t ip[sizeof(uip_ipaddr_t)];
         uint8_t i = 0;
 	for( i = 0; i < sizeof(ip); i++){
       		ip[i] = ringbuf_get(&serialRx_Buffer);
@@ -763,6 +790,19 @@ struct connection *getConnectionFromRIpRPort(){
 
         struct connection *c = NULL;
         for( i = 0; i < MAX_CONNECTIONS; i++){
+	//  for (int j=0; j<16; j++ ) {
+	//     uart0_writeb(connections[i].ripaddr.u8[j]);
+	//  }
+
+	//  for (int j=0; j<16; j++ ) {
+	//     uart0_writeb(connections[i].ripaddr.u8[j]);
+	//  }
+
+	//  for (int j=0; j<2; j++) {
+	//  uart0_writeb(((uint8_t*) &connections[i].rport)[j]);
+	//  uart0_writeb(((uint8_t*) &port)[j]);
+	//  }
+	//     uart0_writeb('\n');
 		if(memcmp(connections[i].ripaddr.u8, ip, sizeof(ip)) == 0 && connections[i].rport == port){ // TODO memcmp manpage nachsehen
 			c = &connections[i];
 		}
