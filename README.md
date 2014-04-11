@@ -5,7 +5,9 @@ This Code enables the [Arduino-firmware](https://github.com/pscholl/Arduino) run
 
 **TODO:**
 
-- get it working!
+- Implement Configurations
+- Implement Timeouts for the Serial API
+- Reduce tcp_poll timer
 
 
 ## Installation

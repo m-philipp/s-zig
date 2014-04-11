@@ -96,6 +96,7 @@
 #define STATE_IDLE 1
 #define STATE_RECEIVING_TCP_DATA 2
 #define STATE_ARDUINO_CALLBACK_TIMED_OUT 3
+#define STATE_TEARING_DOWN 4
 
 
 #define TCP_RX_BUFFER_SIZE 128
@@ -104,7 +105,7 @@
 #define SERIAL_RX_BUFFER_SIZE 128 // need size of power two!
 
 #define PACKET_TIMEOUT 60 * CLOCK_SECOND
-#define MAX_CONNECTIONS 16
+#define MAX_CONNECTIONS 8
 #define MAX_SERVER 4
 
 #define MAX_CONNECTION_SETUP_TIME 10000 // seconds
@@ -289,6 +290,7 @@ PROCESS_THREAD(plastic_sense_process, ev, data)
 /*---------------------------------------------------------------------------*/
 // Handle input on the serial line.
 int callback(uint8_t d){
+	 //uart0_writeb(d);
          ringbuf_put(&serialRx_Buffer, d);
          process_poll(&plastic_sense_process);
 	 leds_toggle(LEDS_ALL);
@@ -322,10 +324,11 @@ void tcp_appcall(void *state){
 
 				c = &connections[i];
 
-				if(connectSetupTime > 0 && ((unsigned long) connectSetupTime - clock_time() > MAX_CONNECTION_SETUP_TIME)){
+				if(connectSetupTime > 0 && ((unsigned long) clock_time() - connectSetupTime < MAX_CONNECTION_SETUP_TIME)){
 					uart0_writeb(OPCODE_CONNECT_TO_IP); // TODO check if OPCODE_CONNECT_TO_HOST was called
 					uart0_writeb(0x01);
 					uart0_writeb(0x01);
+					connectSetupTime = 0;
 				}
 
 				break;
@@ -348,6 +351,12 @@ void tcp_appcall(void *state){
 			uip_abort();
 			return;
 		}
+		else if(c->state == STATE_TEARING_DOWN){
+			uip_close();
+			clearConnection(c);
+			return;
+		}
+
 		INFO("handling connection\n");
 		handle_connection(c);
 	} else {	
@@ -571,12 +580,24 @@ void decodeSerialCommand(void *state){
 				break;
 			}
 
+			// determ how much bytes can be written.
+			uint8_t numWrittenBytes = (payloadLength - 18);
+			if((TCP_TX_BUFFER_SIZE - c->tcpTx_Pointer) < numWrittenBytes)
+				numWrittenBytes = TCP_TX_BUFFER_SIZE - c->tcpTx_Pointer;
+
 			uint8_t i = 0;
 			for (i = 0; i < (payloadLength - 18); i++){
-				c->tcpTx_Buffer[c->tcpTx_Pointer++] = ringbuf_get(&serialRx_Buffer);
+				if(i < numWrittenBytes)
+					c->tcpTx_Buffer[c->tcpTx_Pointer++] = ringbuf_get(&serialRx_Buffer);
+				else
+					ringbuf_get(&serialRx_Buffer);
+					
 			}
+
+
 			uart0_writeb(OPCODE_TCP_WRITE);
-			uart0_writeb(0x00);
+			uart0_writeb(0x01);
+			uart0_writeb(numWrittenBytes);
 		break;
 		}
 		case OPCODE_TCP_AVAILABLE: {
@@ -589,7 +610,7 @@ void decodeSerialCommand(void *state){
 				INFO("ERROR: COULD NOT CHECK FOR AVAILABLE BYTES, BECAUSE CONNECTION DOESNT EXIST ANYMORE\n");
 				uart0_writeb(OPCODE_TCP_AVAILABLE);
 				uart0_writeb(0x01);
-				uart0_writeb((int8_t) -1);
+				uart0_writeb(0xff);
 				break;
 			}
 
@@ -673,10 +694,10 @@ void decodeSerialCommand(void *state){
 			uart0_writeb(0x01);
 
 			if(c == NULL){
-				uart0_writeb(0x01);
+				uart0_writeb(0x00);
 			}
 			else{
-				uart0_writeb(0x00);
+				uart0_writeb(0x01);
 			}
 		break;
 		}
@@ -724,6 +745,8 @@ void decodeSerialCommand(void *state){
 		case OPCODE_TCP_SERVER_WRITE: {
 			INFO("decode: OPCODE_TCP_SERVER_WRITE\n");
 			
+			// TODO check if payload is not too long!
+
        			uint16_t port;
         		port = ringbuf_get(&serialRx_Buffer) << 8;
         		port = ringbuf_get(&serialRx_Buffer) | port;
@@ -751,20 +774,38 @@ void decodeSerialCommand(void *state){
 		}
 		case OPCODE_CONNECTION_TEARDOWN: {
 			INFO("decode: OPCODE_CONNECTION_TEARDOWN\n");
+                        
+			struct connection *c;
+			c = (struct connection *) getConnectionFromRIpRPort();
+			
+			if(c == NULL){
+				// TODO Handle Failue in Jennic and Arduino
+				INFO("ERROR: COULD NOT WRITE, BECAUSE CONNECTION DOESNT EXIST ANYMORE\n");
+				break;
+			}
+
 			// TODO
 			for(uint8_t i = 0; i < payloadLength; i++){
 				ringbuf_get(&serialRx_Buffer);
 			}
+			
+			c->state = STATE_TEARING_DOWN;
+
 			uart0_writeb(OPCODE_CONNECTION_TEARDOWN);
 			uart0_writeb(0x00);
 		break;
 		}
 		case OPCODE_CLOSE_SERVER_PORT: {
 			INFO("decode: OPCODE_CLOSE_SERVER_PORT\n");
-			// TODO
-			for(uint8_t i = 0; i < payloadLength; i++){
-				ringbuf_get(&serialRx_Buffer);
-			}
+
+		       	uint16_t port;
+		        port = ringbuf_get(&serialRx_Buffer) << 8;
+		        port = ringbuf_get(&serialRx_Buffer) | port;
+	
+			tcp_unlisten(UIP_HTONS(port));
+	
+			// TODO close affected connections ? 
+
 			uart0_writeb(OPCODE_CLOSE_SERVER_PORT);
 			uart0_writeb(0x00);
 		break;

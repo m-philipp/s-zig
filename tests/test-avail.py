@@ -74,27 +74,9 @@ class TestSuite(unittest.TestCase):
 			print "Python: establishing Connection."
 			(clientSocket, clientAddress) = serverSocket.accept()
 			print "Python: Connection established"
-		
-			time.sleep(3)
-			
-			# let the Jennic send some btes via tcp
-                        payloadLength = 18
-			payload = ""
-                        for i in range(10):
-            			payload += "0123456789"
-                                payloadLength += 10
-                        print "Python: sending: " + payload
-			print "Python: send Jennic some bytes to transmit."
-			self.p.stdin.write(struct.pack(">BB16BH"+str(payloadLength - 18)+"s", 14,payloadLength,ip[0],ip[1],ip[2],ip[3],ip[4],ip[5],ip[6],ip[7],ip[8],ip[9],ip[10],ip[11],ip[12],ip[13],ip[14],ip[15],port,payload))
+		        
 
-
-			time.sleep(1)
-			opcode,length,sb=struct.unpack(">BBB", self.p.stdout.read(3))
-			print "Python: opcode: ", opcode, " length: ", length, " sendBytes: ", sb
-			time.sleep(1)
-			recievedPayload = clientSocket.recv(128)
-			print "Python: socket recieved: " , recievedPayload
-			self.assertTrue(True)
+			time.sleep(20) # sleep 20 Sec
 		
 
 
@@ -116,10 +98,15 @@ class TestSuite(unittest.TestCase):
 		self.assertTrue(returnValue == (13, 1, 1))
 		print "Python: got connection established from Jennic"
 		
+                print "Python: ask how much data is available (should be zero)"
+		self.p.stdin.write(struct.pack(">BB16BH", 15,18,ip[0],ip[1],ip[2],ip[3],ip[4],ip[5],ip[6],ip[7],ip[8],ip[9],ip[10],ip[11],ip[12],ip[13],ip[14],ip[15],port))
 		
+	        returnValue = struct.unpack(">BBB", self.p.stdout.read(3))
+                print "Python: Jennic returned: " + str(returnValue);
+		self.assertTrue(returnValue == (15, 1, 0))
+
 		# time.sleep(6)
-		while True:
-			time.sleep(2)
+		time.sleep(2)
 
 	
 	def tearDown(self):
